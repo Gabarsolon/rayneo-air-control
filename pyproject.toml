@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rayneo-control"
+version = "0.1.0"
+description = "Reverse-engineered runtime USB-HID control for RayNeo Air 4 Pro (taurus4p0) AR glasses"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "hidapi>=0.14",
+]
+
+[project.scripts]
+rayneo = "rayneo_control.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["rayneo_control*"]

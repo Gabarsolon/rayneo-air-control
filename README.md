@@ -1,0 +1,137 @@
+# rayneo-control
+
+Runtime USB-HID control for RayNeo Air 4 Pro AR glasses (codename `taurus4p0`),
+built from reverse-engineering the STM32 firmware image and confirming
+behavior against a real device.
+
+```
+pip install -e .
+rayneo status
+rayneo mode sdr        # sdr | ai-hdr | hdr10
+rayneo list             # every known command + how sure we are about it
+rayneo raw --cmd 0x1A --val 0x00
+rayneo scan             # probe the full command-id range live
+```
+
+## Why this exists
+
+The glasses' Pixelworks PX8618 does SDR→HDR "inverse tone mapping" —
+brightening/lifting an SDR signal to simulate HDR — whenever display
+mode is AI-HDR or HDR10 and the incoming signal isn't actually HDR.
+That's a shadow-lift by design, and on a black screen it shows up as
+"black looks gray." An existing control tool for these glasses
+(`rayneo_control.py`, from an earlier Antigravity/Gemini session) got
+partway there but shipped a `--status` decoder that reads mostly
+hardcoded constants as if they were live telemetry, and preset name
+tables (`--gamma-index`, `--gamut-mode`) that don't correspond to
+anything in the firmware. This project starts over with an explicit
+confidence rating on every command, verified against the disassembly
+and, where possible, a live device.
+
+**This project never writes firmware.** It only speaks the existing
+runtime HID control channel — the same one the OEM app uses. There is
+no DFU/bootloader code path here and there won't be one added.
+
+## Protocol
+
+Device: VID `0x1BBB`, PID `0xAF50`. 65-byte HID reports (byte 0 is the
+report-ID hidapi requires on Windows, ignored by the device).
+
+```
+[0]      report id (0x00)
+[1]      magic: 0x66 short-form | 0x77 long-form | 0x88 raw passthrough
+[2]      cmd id            (0x66 form)
+[3]      value byte        (0x66 form)
+[4..]    "extra" byte (always 0x56 in every confirmed send) + padding
+```
+
+Responses start with header bytes `99 C8 40 00` regardless of command.
+
+This was recovered by disassembling the packet framer at firmware
+address `0x08010C84` and the 165-entry command dispatch table at
+`0x08012414` (~72 of the 165 slots point at a real handler; the rest
+share one "unimplemented" stub at `0x080123A7`). Framing details live in
+[`rayneo_control/protocol.py`](rayneo_control/protocol.py); per-command
+notes live in [`rayneo_control/commands.py`](rayneo_control/commands.py).
+
+### Confidence ratings
+
+| Rating | Meaning |
+|---|---|
+| `confirmed` | Sent to a real device; response/behavior matched prediction |
+| `traced` | Handler fully disassembled; not exercised live yet |
+| `experimental` | Dispatch located (e.g. a vtable slot); callee not resolved |
+
+| cmd | name | confidence | notes |
+|---|---|---|---|
+| `0x00` | STATUS | confirmed | see caveat below — most fields are fake |
+| `0x1A` | DISPLAY_MODE | confirmed | `0`=SDR, `1`=AI-HDR, `2`=HDR10; persisted to NVM |
+| `0x29`/`0x54` | PANEL_HDR10_CHANGE | traced | `hid_call_panel_hdr10_change`, value semantics unresolved |
+| `0x48` | AUDIO_TUBE_MODE | traced | audio routing, not display |
+| `0x6D` | GAMMA_INDEX | experimental | indirects through `*(0x2005A090)+0x30`; returns -1 if null |
+| `0x6E` | GAMUT_MODE | experimental | indirects through `*(0x2005A090)+0x34`; returns -1 if null |
+
+Brightness control is **not implemented**. The firmware clearly has it
+(`sy060ldm01_set_lum lum = %d` exists as a string, called from the
+panel driver), but no HID command ID has been mapped to it yet — that's
+the most valuable open question, and `rayneo scan` exists specifically
+to help chase it down live.
+
+### The STATUS command caveat
+
+The prior tool's `--status` output (`brightness`, `volume`, `mode_raw`,
+`wear_sensor`) is not real. Disassembling the status builder at
+`0x08010EF0` shows:
+
+- `resp[0x24..0x27]` is the **hardcoded literal** `0x0A01001A`
+- `resp[0x34..0x37]` and `resp[0x38..0x3B]` are two **hardcoded float
+  `6.0`** values, not volume/mode bytes
+- `resp[0x3E]` is a **hardcoded `1`**, not a worn-sensor read
+- current display mode is **not present** in the status response at all
+
+`rayneo_control.protocol.parse_status()` only exposes the fields that
+are actually live: uptime ticks, build-date string, and refresh rate
+(`0x3C`/`0x5A`/`0x78` → 60/90/120 Hz).
+
+## The gray-black diagnosis (context for why display mode matters)
+
+Live NVAPI query on this setup showed Windows HDR was **off** the whole
+time, wire signal RGB / VESA full-range SDR, glasses as sole attached
+display at 1920x1080@120. Every "HDR" toggle in earlier testing was
+therefore the glasses' own `px8618_sdr2hdr_hdr_set`/`_load` inverse
+tone-mapper running on a plain SDR desktop — which lifts shadows by
+construction. `rayneo mode sdr` takes that tone-mapper out of the loop.
+
+Separately, the LT7911UXC bridge carries 7 EDIDs (swapped per display
+mode) with real defects: `QS=0` (RGB-quantization-range-not-selectable)
+plus a native CE VIC-16 timing and an HDMI 1.4 VSDB on several of them —
+the classic "GPU treats me as a TV and defaults to limited range"
+combination — and the HDR variants declare `MaxLuminance=1600 nits` /
+`MaxFALL=800 nits` against a real panel closer to 600, so any real PQ
+content that does arrive gets tone-mapped for a display much brighter
+than what's in front of your eyes. None of that is fixed by this tool —
+fixing it safely would mean a Windows-side EDID override, never a
+firmware rewrite — but it's documented here since it's load-bearing
+context for anyone continuing this investigation.
+
+## Continuing the reverse engineering
+
+`rayneo scan` sends `val=0` to every command ID in `0x00..0xA4` and
+groups responses so the "unimplemented stub" cluster (all identical) is
+easy to tell apart from real handlers (their own distinct response).
+Anything that stands out from the cluster and isn't in
+`commands.COMMANDS` yet is worth a disassembly pass — PRs welcome.
+
+## Safety
+
+- No DFU / firmware-write code path exists in this repo, intentionally.
+- `rayneo raw` and `rayneo scan` only use the confirmed 0x66 short form.
+- The 0x88 raw-passthrough magic is documented in `protocol.py` but
+  deliberately has no CLI command wired to it yet — it's the most
+  likely path to direct PX8618 register access
+  (`hid_call_px8618_write_read_reg`) and the least understood, so it
+  isn't something to fire blindly at a $500 pair of glasses.
+
+## License
+
+MIT
