@@ -122,6 +122,32 @@ easy to tell apart from real handlers (their own distinct response).
 Anything that stands out from the cluster and isn't in
 `commands.COMMANDS` yet is worth a disassembly pass — PRs welcome.
 
+## Investigating the bootloader (read-only)
+
+The DFU package for this device only ever covers the application region
+(`0x0800C000` onward) — the low 48KB (`0x08000000`–`0x0800C000`) isn't in
+the update file at all, which is a strong sign it's a separate,
+first-stage bootloader region. What that bootloader actually validates
+before jumping to the app (a CRC? a signature? nothing?) determines the
+real risk of ever flashing a patched image, and it can't be answered from
+the application dump alone — that code simply isn't in the file.
+
+`tools/dfu_read.py` reads it back directly, live, over the standard USB
+DFU protocol (`DFU_UPLOAD`), with the device in DFU mode:
+
+```
+pip install -r tools/requirements-dfu.txt
+python tools/dfu_read.py --list                     # find the DFU interface's VID:PID
+python tools/dfu_read.py --vid 0x.... --pid 0x.... \
+    --start 0x08000000 --length 0xC000 --out bootloader.bin
+```
+
+This tool has no code path that can send firmware data to the device —
+the only `DFU_DNLOAD` requests it issues are the two mandatory DfuSe
+control commands needed to set up a read (`Set Address Pointer`,
+`Abort`), never a data payload. It's read-only by construction, not by
+promise.
+
 ## Safety
 
 - No DFU / firmware-write code path exists in this repo, intentionally.
