@@ -121,7 +121,6 @@ class RayNeoGUI:
         nb.pack(fill="both", expand=True, padx=8, pady=8)
 
         self._build_status_tab(nb)
-        self._build_mode_tab(nb)
         self._build_traced_tab(nb)
         self._build_experimental_tab(nb)
         self._build_raw_tab(nb)
@@ -173,23 +172,6 @@ class RayNeoGUI:
         self._run_async(work, done)
 
     # -- Mode tab --------------------------------------------------------
-    def _build_mode_tab(self, nb: ttk.Notebook) -> None:
-        frame = ttk.Frame(nb)
-        nb.add(frame, text="Display mode")
-        ttk.Label(
-            frame,
-            text="Only SDR (mode 0) has been confirmed live -- AI-HDR and HDR10 "
-                 "are inferred from the disassembly. Check the glasses after "
-                 "switching.",
-            wraplength=560, foreground="#a06000", justify="left",
-        ).pack(pady=(12, 8), padx=8, anchor="w")
-        btns = ttk.Frame(frame)
-        btns.pack(pady=8)
-        for name, mode in [("SDR", DisplayMode.SDR), ("AI-HDR", DisplayMode.AI_HDR), ("HDR10", DisplayMode.HDR10)]:
-            ttk.Button(btns, text=name, command=lambda m=mode, n=name: self._set_mode(m, n)).pack(
-                side="left", padx=8
-            )
-
     def _set_mode(self, mode: DisplayMode, name: str) -> None:
         self._log(f"setting display mode -> {name}...")
 
@@ -215,6 +197,16 @@ class RayNeoGUI:
                  "in the glasses' own OSD menu, not a confirmed correspondence.",
             wraplength=560, foreground="#a06000", justify="left",
         ).pack(padx=8, pady=(12, 8), anchor="w")
+
+        # -- Dynamic quality [OSD: SDR/AI-HDR/HDR10] -- the one CONFIRMED
+        # control on this tab (everything else here is TRACED/EXPERIMENTAL).
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Dynamic quality (0x1A)\n[SDR/AI-HDR/HDR10]", width=20, justify="left").pack(side="left")
+        for name, mode in [("SDR", DisplayMode.SDR), ("AI-HDR", DisplayMode.AI_HDR), ("HDR10", DisplayMode.HDR10)]:
+            ttk.Button(row, text=name, command=lambda m=mode, n=name: self._set_mode(m, n)).pack(
+                side="left", padx=4
+            )
 
         # -- Brightness (slider, applies live/debounced -- no Set button).
         # BRIGHTNESS_SAVE (0x0D) writes to flash, so that stays a separate,
