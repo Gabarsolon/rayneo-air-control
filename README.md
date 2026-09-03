@@ -31,6 +31,21 @@ from the tray menu) if `pystray`/`Pillow` are installed, otherwise the
 window just quits normally on close. Same boundary as the CLI: it only
 calls `RayNeoDevice`, no separate protocol implementation, no DFU path.
 
+**Don't want to install Python?** Grab `RayNeoControl.exe` from the
+[latest release](https://github.com/Gabarsolon/rayneo-air-control/releases/latest)
+— double-click it, no setup. It's a PyInstaller one-file build of the
+exact same GUI above; two processes showing up for it in Task Manager
+is normal PyInstaller onefile behavior (an outer bootloader launching
+the real one), not two copies running.
+
+To build it yourself instead of trusting a downloaded binary:
+
+```
+pip install -e .[gui] pyinstaller
+pyinstaller --name RayNeoControl --onefile --windowed --clean run_gui.py
+# -> dist/RayNeoControl.exe
+```
+
 ## Why this exists
 
 The glasses' Pixelworks PX8618 does SDR→HDR "inverse tone mapping" —
