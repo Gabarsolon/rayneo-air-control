@@ -50,11 +50,12 @@ COMMANDS = {
     0x09: ("BRIGHTNESS", Confidence.TRACED,
            "ffalcon::XRService::PanelLunaSet. The Android app runs its UI index "
            "through a lookup table (falls back to 0xFF if out of range) before "
-           "sending -- the raw device brightness scale behind that table is not "
-           "known, so a given val here may not match a specific OEM-app UI level. "
-           "One live data point so far: val=0 reads BRIGHTER than val=1 -- this "
-           "looks like a dimness/index byte (lower = brighter), not a brightness "
-           "byte, but that's confirmed only near the low end, not across 0-255."),
+           "sending -- val is a small table index, not a smooth brightness byte. "
+           "Live-tested on taurus4p0: val=1 is dimmest, climbs normally through "
+           "val=4 (brightest), then val=5 drops back down again -- non-monotonic "
+           "past 4, and val=0 reads brighter than val=1 too. The glasses' OSD "
+           "offers 8 brightness levels total, so this 1-4 climb is likely only "
+           "part of the real curve; 0 and 5+ not fully mapped yet."),
     0x0D: ("BRIGHTNESS_SAVE", Confidence.TRACED,
            "ffalcon::XRService::PanelLunaSave. No value byte (val=0) -- persists "
            "whatever BRIGHTNESS was last set to."),
@@ -74,7 +75,10 @@ COMMANDS = {
            "ffalcon::XRService::SetAudioMode. Distinct from 0x48 AUDIO_TUBE_MODE below. "
            "Likely the OSD's 'Audio effect: Standard/Whisper/Surround' (3 values) --"
            "unconfirmed correspondence, not verified against the actual value bytes."),
-    0x50: ("VOLUME", Confidence.TRACED, "ffalcon::XRService::SetAudioVolume. val = volume level."),
+    0x50: ("VOLUME", Confidence.TRACED,
+           "ffalcon::XRService::SetAudioVolume. Not a 0-100 percentage -- the "
+           "glasses' OSD offers 13 discrete volume levels, so val is almost "
+           "certainly a small index like BRIGHTNESS above, not tested live yet."),
     0x54: ("PANEL_HDR10_CHANGE_B", Confidence.TRACED,
            "Alias of 0x29 -- both dispatch to hid_call_panel_hdr10_change."),
     0x48: ("AUDIO_TUBE_MODE", Confidence.TRACED,

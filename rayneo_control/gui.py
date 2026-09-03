@@ -221,15 +221,25 @@ class RayNeoGUI:
 
         ttk.Label(
             frame,
-            text="Only build date / uptime / refresh rate are real -- brightness, "
-                 "volume, mode and wear-sensor in the raw STATUS response are "
-                 "hardcoded constants in this firmware build, not live telemetry.",
+            text="Only build date / uptime / refresh rate are decoded as real fields "
+                 "-- brightness, volume, mode and wear-sensor elsewhere in the raw "
+                 "response are hardcoded constants in this firmware build, not live "
+                 "telemetry. Everything the device actually sent is in the hex dump "
+                 "below, though -- worth a look if you're hunting for a pattern.",
             wraplength=560, justify="left", foreground="#666",
         ).grid(row=len(rows), column=0, columnspan=2, sticky="w", padx=8, pady=(8, 4))
 
         ttk.Button(frame, text="Refresh status", command=self._refresh_status).grid(
-            row=len(rows) + 1, column=0, columnspan=2, pady=12
+            row=len(rows) + 1, column=0, columnspan=2, pady=(4, 8)
         )
+
+        ttk.Label(frame, text="Full raw response (64 bytes):").grid(
+            row=len(rows) + 2, column=0, columnspan=2, sticky="w", padx=8
+        )
+        self.status_hexdump = scrolledtext.ScrolledText(frame, height=8, width=64, state="disabled")
+        self.status_hexdump.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="nsew", padx=8, pady=(2, 8))
+        frame.grid_rowconfigure(len(rows) + 3, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
 
     def _refresh_status(self) -> None:
         self._log("querying status...")
@@ -242,9 +252,23 @@ class RayNeoGUI:
             self.status_vars["build_date"].set(repr(st.build_date))
             self.status_vars["uptime"].set(str(st.uptime_ticks))
             self.status_vars["refresh"].set(f"{st.refresh_hz or 'unknown'} Hz")
+            self._set_hexdump(st.raw)
             self._append_log("status ok")
 
         self._run_async(work, done)
+
+    def _set_hexdump(self, data: bytes) -> None:
+        lines = []
+        for off in range(0, len(data), 16):
+            chunk = data[off : off + 16]
+            hex_part = " ".join(f"{b:02x}" for b in chunk)
+            ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+            lines.append(f"{off:04x}  {hex_part:<47}  {ascii_part}")
+        text = "\n".join(lines)
+        self.status_hexdump.configure(state="normal")
+        self.status_hexdump.delete("1.0", "end")
+        self.status_hexdump.insert("1.0", text)
+        self.status_hexdump.configure(state="disabled")
 
     # -- Mode tab --------------------------------------------------------
     def _set_mode(self, mode: DisplayMode, name: str) -> None:
@@ -287,39 +311,47 @@ class RayNeoGUI:
         # BRIGHTNESS_SAVE (0x0D) writes to flash, so that stays a separate,
         # deliberate button rather than firing on every drag tick.
         #
-        # from_=255, to=0 (reversed): one confirmed live data point so far
-        # is 0 reading BRIGHTER than 1, i.e. this is a dimness/index byte,
-        # not a brightness byte -- flipping the slider's own ends means
-        # dragging right still feels like "brighter" without guessing at
-        # a value transform we can't verify across the whole 0-255 range.
+        # This is a small index into a lookup table, not a smooth 0-255
+        # brightness byte -- live-tested so far: 1=dimmest, climbing
+        # normally through 4=brightest, then 5 drops back down again
+        # (non-monotonic past 4). The glasses' own OSD offers 8 brightness
+        # levels, so 1-4 is likely only half the real range, not the whole
+        # curve -- widened to 0-9 (a little margin past the expected 0-7/1-8
+        # span) rather than locking out levels we haven't mapped yet.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Brightness (0x09)\n[0=brightest, per testing]", width=20, justify="left").pack(
-            side="left"
-        )
-        self.brightness_var = tk.IntVar(value=128)
-        self.brightness_label = ttk.Label(row, text="128", width=4)
+        ttk.Label(
+            row, text="Brightness (0x09)\n[1..4 climbs, 5 drops; 8 OSD levels total]",
+            width=24, justify="left",
+        ).pack(side="left")
+        self.brightness_var = tk.IntVar(value=2)
+        self.brightness_label = ttk.Label(row, text="2", width=4)
         scale = ttk.Scale(
-            row, from_=255, to=0, orient="horizontal", variable=self.brightness_var,
+            row, from_=0, to=9, orient="horizontal", variable=self.brightness_var,
             command=self._on_brightness_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
-        self._bind_scale_keys(scale, 0, 255)
+        self._bind_scale_keys(scale, 0, 9, step=1, page=1)
         self.brightness_label.pack(side="left", padx=(0, 4))
         ttk.Button(row, text="Save (0x0D)", command=self._save_brightness).pack(side="left", padx=4)
 
         # -- Volume (slider, applies live/debounced) ------------------------
+        # Not a 0-100 percentage -- the OSD has 13 discrete volume levels, so
+        # this is almost certainly a small index like brightness, not a raw
+        # percentage. 0-100 was a placeholder guess; using 0-13 now (13
+        # levels, 0-indexed with a little margin) until live testing pins
+        # down the exact valid range/order the way brightness's was.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Volume (0x50)", width=20).pack(side="left")
-        self.volume_var = tk.IntVar(value=50)
-        self.volume_label = ttk.Label(row, text="50", width=4)
+        ttk.Label(row, text="Volume (0x50)\n[13 OSD levels, untested]", width=24, justify="left").pack(side="left")
+        self.volume_var = tk.IntVar(value=6)
+        self.volume_label = ttk.Label(row, text="6", width=4)
         scale = ttk.Scale(
-            row, from_=0, to=100, orient="horizontal", variable=self.volume_var,
+            row, from_=0, to=13, orient="horizontal", variable=self.volume_var,
             command=self._on_volume_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
-        self._bind_scale_keys(scale, 0, 100)
+        self._bind_scale_keys(scale, 0, 13, step=1, page=1)
         self.volume_label.pack(side="left", padx=(0, 4))
 
         # -- Refresh rate (two cmd_ids, not a value byte; applies on click) --
