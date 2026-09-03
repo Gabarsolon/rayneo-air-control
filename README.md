@@ -13,6 +13,21 @@ rayneo raw --cmd 0x1A --val 0x00
 rayneo scan             # probe the full command-id range live
 ```
 
+There's also a Windows tray GUI (`rayneo_control/gui.py`) covering the
+same ground as the CLI above — status, mode buttons, and, since it's
+meant as a live probing tool rather than a polished consumer app, the
+raw-command and scan panels too:
+
+```
+pip install -e .[gui]
+rayneo-gui
+```
+
+It minimizes to the system tray (SDR/AI-HDR/HDR10 available directly
+from the tray menu) if `pystray`/`Pillow` are installed, otherwise the
+window just quits normally on close. Same boundary as the CLI: it only
+calls `RayNeoDevice`, no separate protocol implementation, no DFU path.
+
 ## Why this exists
 
 The glasses' Pixelworks PX8618 does SDR→HDR "inverse tone mapping" —
