@@ -8,6 +8,9 @@ behavior against a real device.
 pip install -e .
 rayneo status
 rayneo mode sdr        # sdr | ai-hdr | hdr10
+rayneo brightness 128 --save   # traced, not confirmed -- see below
+rayneo volume 50               # traced, not confirmed
+rayneo reboot-dfu              # software DFU entry, traced, not confirmed
 rayneo list             # every known command + how sure we are about it
 rayneo raw --cmd 0x1A --val 0x00
 rayneo scan             # probe the full command-id range live
@@ -86,17 +89,34 @@ notes live in [`rayneo_control/commands.py`](rayneo_control/commands.py).
 | cmd | name | confidence | notes |
 |---|---|---|---|
 | `0x00` | STATUS | confirmed | see caveat below — most fields are fake |
+| `0x09` | BRIGHTNESS | traced | see below — value scale not confirmed |
+| `0x0D` | BRIGHTNESS_SAVE | traced | no value byte; persists last BRIGHTNESS |
+| `0x0E` | PANEL_POWER_ON | traced | no value byte |
+| `0x0F` | PANEL_POWER_OFF | traced | no value byte |
+| `0x12` | PANEL_POWER_SWAP | traced | no value byte |
 | `0x1A` | DISPLAY_MODE | confirmed | `0`=SDR, `1`=AI-HDR, `2`=HDR10; persisted to NVM |
 | `0x29`/`0x54` | PANEL_HDR10_CHANGE | traced | `hid_call_panel_hdr10_change`, value semantics unresolved |
 | `0x48` | AUDIO_TUBE_MODE | traced | audio routing, not display |
+| `0x49` | AUDIO_MODE | traced | adjacent to 0x48, distinct handler |
+| `0x50` | VOLUME | traced | |
+| `0x66` | REBOOT_TO_BOOTLOADER | traced | software DFU entry, no button-hold |
 | `0x6D` | GAMMA_INDEX | experimental | indirects through `*(0x2005A090)+0x30`; returns -1 if null |
 | `0x6E` | GAMUT_MODE | experimental | indirects through `*(0x2005A090)+0x34`; returns -1 if null |
+| `0x73` | PICTURE_MODE | experimental | 3-byte payload; wire layout not confirmed |
 
-Brightness control is **not implemented**. The firmware clearly has it
-(`sy060ldm01_set_lum lum = %d` exists as a string, called from the
-panel driver), but no HID command ID has been mapped to it yet — that's
-the most valuable open question, and `rayneo scan` exists specifically
-to help chase it down live.
+Brightness, volume, audio mode, and software DFU entry were all
+**unmapped from the STM32 image alone** — that stayed the most valuable
+open question for a while. They were finally recovered from the
+*other* side of the wire: disassembling the RayNeo Android app's
+native SDK (`libFFalconXRServer.so`, class `ffalcon::XRService`) shows
+every one of `PanelLunaSet`/`SetAudioVolume`/`SetAudioMode`/
+`RebootAndBootloader`/etc. funneling through one shared
+`Send(this, cmd_id, value, extra_ptr, extra_len)` call, with the
+cmd_id literal each one passes matching straight into this same
+0x00–0xA4 numbering space. None of the above have been exercised live
+from this project yet — that's the natural next step with a real
+device in hand, and each one should move from `traced`/`experimental`
+to `confirmed` (or get corrected) once it has been.
 
 ### The STATUS command caveat
 
@@ -153,6 +173,17 @@ groups responses so the "unimplemented stub" cluster (all identical) is
 easy to tell apart from real handlers (their own distinct response).
 Anything that stands out from the cluster and isn't in
 `commands.COMMANDS` yet is worth a disassembly pass — PRs welcome.
+
+The other productive direction, which is how brightness/volume/audio
+mode/DFU-reboot got found at all: cross-reference the **Android app**
+instead of the STM32 image. Decompiling the RayNeo Android app (jadx)
+and reading its native SDK's exported JNI symbols (`FxrApi` in the
+Java layer, `ffalcon::XRService` in `libFFalconXRServer.so`) turns up
+named, human-readable methods for functionality the STM32 dispatch
+table alone gives you only as an anonymous handler address. Every
+`Panel*`/`SetAudio*`/`Reboot*` method there ends up calling the same
+shared `Send(this, cmd_id, value, ...)` primitive, and the cmd_id
+literal each one passes is directly usable here.
 
 ## Investigating the bootloader
 

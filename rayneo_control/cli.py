@@ -2,6 +2,9 @@
 
     rayneo status
     rayneo mode sdr | ai-hdr | hdr10
+    rayneo brightness <level> [--save]
+    rayneo volume <level>
+    rayneo reboot-dfu
     rayneo raw --cmd 0x1A --val 0x00 [--extra 0x56]
     rayneo scan [--start 0x00] [--end 0xA4]
 
@@ -52,6 +55,35 @@ def cmd_mode(args: argparse.Namespace) -> int:
             "note: only SDR (mode 0) has been confirmed live in this project so far -- "
             "check the display and run `rayneo status` / look at the glasses to confirm this did what you expect."
         )
+    return 0
+
+
+def cmd_brightness(args: argparse.Namespace) -> int:
+    with RayNeoDevice() as dev:
+        resp = dev.set_brightness(args.level)
+        if args.save:
+            dev.save_brightness()
+    print(f"set brightness -> {args.level} (0x{args.level:02x}){'  (saved)' if args.save else ''}")
+    print(f"ack: {resp.hex()}")
+    print("note: TRACED, not CONFIRMED -- the OEM app maps a UI index through a "
+          "lookup table before sending this value; watch the glasses to see what it actually did.")
+    return 0
+
+
+def cmd_volume(args: argparse.Namespace) -> int:
+    with RayNeoDevice() as dev:
+        resp = dev.set_volume(args.level)
+    print(f"set volume -> {args.level} (0x{args.level:02x})")
+    print(f"ack: {resp.hex()}")
+    print("note: TRACED, not CONFIRMED -- verify by ear.")
+    return 0
+
+
+def cmd_reboot_dfu(args: argparse.Namespace) -> int:
+    with RayNeoDevice() as dev:
+        resp = dev.reboot_to_bootloader()
+    print("sent REBOOT_TO_BOOTLOADER -- glasses should drop into DFU mode without a button hold")
+    print(f"ack: {resp.hex()}")
     return 0
 
 
@@ -116,6 +148,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("mode", help="set display mode")
     sp.add_argument("mode", choices=sorted(_MODE_NAMES))
     sp.set_defaults(func=cmd_mode)
+
+    sp = sub.add_parser("brightness", help="set brightness (TRACED, not CONFIRMED -- see README)")
+    sp.add_argument("level", type=lambda x: int(x, 0), help="raw device value, e.g. 0-255")
+    sp.add_argument("--save", action="store_true", help="also persist it (cmd 0x0D)")
+    sp.set_defaults(func=cmd_brightness)
+
+    sp = sub.add_parser("volume", help="set volume (TRACED, not CONFIRMED -- see README)")
+    sp.add_argument("level", type=lambda x: int(x, 0), help="raw device value")
+    sp.set_defaults(func=cmd_volume)
+
+    sp = sub.add_parser("reboot-dfu", help="software DFU entry (TRACED, not CONFIRMED -- see README)")
+    sp.set_defaults(func=cmd_reboot_dfu)
 
     sp = sub.add_parser("raw", help="send a raw short-form (0x66) command")
     sp.add_argument("--cmd", required=True, help="command id, e.g. 0x1A")

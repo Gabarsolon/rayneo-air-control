@@ -96,7 +96,63 @@ class RayNeoDevice:
         protocol.check_header(resp)
         return resp
 
+    # -- traced operations (see commands.py; recovered from the Android
+    #    app's native SDK, not yet exercised live from this project) ------
+    def set_brightness(self, level: int) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x09]. The OEM app runs its UI
+        index through a lookup table before sending; the raw scale this
+        expects isn't known, so start low and watch the glasses."""
+        resp = self.send(Command.BRIGHTNESS, level)
+        if resp is None:
+            raise TimeoutError("no response to BRIGHTNESS command")
+        return resp
+
+    def save_brightness(self) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x0D]. No value byte; persists
+        whatever set_brightness() last set."""
+        resp = self.send(Command.BRIGHTNESS_SAVE)
+        if resp is None:
+            raise TimeoutError("no response to BRIGHTNESS_SAVE command")
+        return resp
+
+    def set_audio_mode(self, mode: int) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x49]. Distinct from the
+        AUDIO_TUBE_MODE (0x48) command below."""
+        resp = self.send(Command.AUDIO_MODE, mode)
+        if resp is None:
+            raise TimeoutError("no response to AUDIO_MODE command")
+        return resp
+
+    def set_volume(self, level: int) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x50]."""
+        resp = self.send(Command.VOLUME, level)
+        if resp is None:
+            raise TimeoutError("no response to VOLUME command")
+        return resp
+
+    def reboot_to_bootloader(self) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x66]. Software DFU entry --
+        no button-hold needed. No value byte."""
+        resp = self.send(Command.REBOOT_TO_BOOTLOADER)
+        if resp is None:
+            raise TimeoutError("no response to REBOOT_TO_BOOTLOADER command")
+        return resp
+
     # -- experimental operations -----------------------------------------
+    def set_picture_mode(self, mode: int, p1: int = 0, p2: int = 0) -> bytes:
+        """EXPERIMENTAL -- see commands.COMMANDS[0x73]. The Android app
+        sends this as a 3-byte payload (mode, p1, p2), not a single value
+        byte; the exact wire layout isn't confirmed, so this sends mode as
+        the short-form val byte and p1/p2 as the following two payload
+        bytes -- a best guess at the framing, not a confirmed one."""
+        pkt = bytearray(protocol.build_short(Command.PICTURE_MODE, mode))
+        pkt[5] = p1
+        pkt[6] = p2
+        resp = self.send_raw(bytes(pkt))
+        if resp is None:
+            raise TimeoutError("no response to PICTURE_MODE command")
+        return resp
+
     def set_gamma_index(self, index: int) -> bytes:
         """EXPERIMENTAL -- see commands.COMMANDS[0x6D]. Valid range unknown;
         the handler returns 0xFFFFFFFF (-1) if the underlying driver object

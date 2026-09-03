@@ -112,6 +112,7 @@ class RayNeoGUI:
 
         self._build_status_tab(nb)
         self._build_mode_tab(nb)
+        self._build_traced_tab(nb)
         self._build_experimental_tab(nb)
         self._build_raw_tab(nb)
         self._build_scan_tab(nb)
@@ -191,6 +192,117 @@ class RayNeoGUI:
 
         self._run_async(work, done)
 
+    # -- Traced tab (brightness/volume/audio/DFU-reboot) -----------------
+    def _build_traced_tab(self, nb: ttk.Notebook) -> None:
+        frame = ttk.Frame(nb)
+        nb.add(frame, text="Brightness/Volume")
+        ttk.Label(
+            frame,
+            text="TRACED, not CONFIRMED: recovered from the RayNeo Android app's "
+                 "native SDK (ffalcon::XRService), not exercised live from this "
+                 "project before. Watch/listen to the glasses after sending.",
+            wraplength=560, foreground="#a06000", justify="left",
+        ).pack(padx=8, pady=(12, 8), anchor="w")
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Brightness (0x09)", width=20).pack(side="left")
+        self.brightness_var = tk.StringVar(value="128")
+        ttk.Entry(row, textvariable=self.brightness_var, width=6).pack(side="left", padx=4)
+        self.brightness_save = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row, text="save (0x0D)", variable=self.brightness_save).pack(side="left", padx=4)
+        ttk.Button(row, text="Set", command=self._set_brightness).pack(side="left", padx=4)
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Volume (0x50)", width=20).pack(side="left")
+        self.volume_var = tk.StringVar(value="50")
+        ttk.Entry(row, textvariable=self.volume_var, width=6).pack(side="left", padx=4)
+        ttk.Button(row, text="Set", command=self._set_volume).pack(side="left", padx=4)
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Audio mode (0x49)", width=20).pack(side="left")
+        self.audio_mode_var = tk.StringVar(value="0")
+        ttk.Entry(row, textvariable=self.audio_mode_var, width=6).pack(side="left", padx=4)
+        ttk.Button(row, text="Set", command=self._set_audio_mode).pack(side="left", padx=4)
+
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
+        ttk.Label(
+            frame,
+            text="Reboot to DFU (0x66): software bootloader entry, no button-hold "
+                 "needed. The glasses will drop off this HID interface immediately.",
+            wraplength=560, foreground="#b00000", justify="left",
+        ).pack(padx=8, pady=(0, 6), anchor="w")
+        ttk.Button(frame, text="Reboot to DFU", command=self._reboot_dfu).pack(padx=8, pady=(0, 8), anchor="w")
+
+    def _set_brightness(self) -> None:
+        try:
+            level = int(self.brightness_var.get(), 0)
+        except ValueError:
+            self._append_log(f"invalid brightness level: {self.brightness_var.get()!r}")
+            return
+        save = self.brightness_save.get()
+        self._log(f"setting brightness -> {level}{' (+ save)' if save else ''}...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                resp = dev.set_brightness(level)
+                if save:
+                    dev.save_brightness()
+                return resp
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"brightness -> {level} ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _set_volume(self) -> None:
+        try:
+            level = int(self.volume_var.get(), 0)
+        except ValueError:
+            self._append_log(f"invalid volume level: {self.volume_var.get()!r}")
+            return
+        self._log(f"setting volume -> {level}...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.set_volume(level)
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"volume -> {level} ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _set_audio_mode(self) -> None:
+        try:
+            mode = int(self.audio_mode_var.get(), 0)
+        except ValueError:
+            self._append_log(f"invalid audio mode: {self.audio_mode_var.get()!r}")
+            return
+        self._log(f"setting audio mode -> {mode}...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.set_audio_mode(mode)
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"audio mode -> {mode} ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _reboot_dfu(self) -> None:
+        self._log("sending REBOOT_TO_BOOTLOADER...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.reboot_to_bootloader()
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"reboot-to-dfu ack: {resp.hex()} (glasses should now be in DFU mode)")
+
+        self._run_async(work, done)
+
     # -- Experimental tab ------------------------------------------------
     def _build_experimental_tab(self, nb: ttk.Notebook) -> None:
         frame = ttk.Frame(nb)
@@ -213,6 +325,43 @@ class RayNeoGUI:
             ttk.Button(row, text="Send", command=lambda m=method, v=var: self._send_experimental(m, v)).pack(
                 side="left", padx=4
             )
+
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Picture mode (0x73)", width=20).pack(side="left")
+        self.picture_mode_var = tk.StringVar(value="0")
+        self.picture_p1_var = tk.StringVar(value="0")
+        self.picture_p2_var = tk.StringVar(value="0")
+        for label, var in [("mode", self.picture_mode_var), ("p1", self.picture_p1_var), ("p2", self.picture_p2_var)]:
+            ttk.Label(row, text=label).pack(side="left", padx=(6, 2))
+            ttk.Entry(row, textvariable=var, width=5).pack(side="left")
+        ttk.Button(row, text="Send", command=self._send_picture_mode).pack(side="left", padx=6)
+        ttk.Label(
+            frame,
+            text="3-byte payload -- the wire layout (which of mode/p1/p2 lands "
+                 "where in the frame) is a best guess, not confirmed.",
+            wraplength=560, foreground="#666", justify="left",
+        ).pack(padx=8, anchor="w")
+
+    def _send_picture_mode(self) -> None:
+        try:
+            mode = int(self.picture_mode_var.get(), 0)
+            p1 = int(self.picture_p1_var.get(), 0)
+            p2 = int(self.picture_p2_var.get(), 0)
+        except ValueError:
+            self._append_log("invalid mode/p1/p2 -- use integers")
+            return
+        self._log(f"set_picture_mode({mode}, {p1}, {p2})...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.set_picture_mode(mode, p1, p2)
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"picture_mode({mode},{p1},{p2}) -> {resp.hex()}")
+
+        self._run_async(work, done)
 
     def _send_experimental(self, method_name: str, var: tk.StringVar) -> None:
         try:
