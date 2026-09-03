@@ -400,21 +400,30 @@ class RayNeoGUI:
         # in testing (may be fire-and-forget by design). The Standard/
         # Movie/Eye-Comfort naming was never confirmed to map to these
         # values at all, so this shows the real numbers, not guessed names.
+        #
+        # DISABLED AGAIN: live testing showed sending this leaves the
+        # glasses' own physical OSD unresponsive afterward (recovered by
+        # reconnecting the glasses, not a hard brick, but a real lockup).
+        # The command genuinely works at the protocol level -- this isn't
+        # about 0x0C vs 0x0F being wrong anymore, it's a hardware-state
+        # side effect we don't understand yet. Re-enable once that's
+        # diagnosed, not before.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Picture mode (0x73)\n[0x0C or 0x0F only]", width=20, justify="left").pack(side="left")
         self.picture_mode_var = tk.StringVar(value="0x0F")
         ttk.Combobox(
-            row, textvariable=self.picture_mode_var, state="readonly", width=8,
+            row, textvariable=self.picture_mode_var, state="disabled", width=8,
             values=["0x0C", "0x0F"],
         ).pack(side="left", padx=4)
         ttk.Label(row, text="p1 (<101):").pack(side="left", padx=(8, 2))
         self.picture_p1_var = tk.IntVar(value=50)
-        ttk.Entry(row, textvariable=self.picture_p1_var, width=5).pack(side="left")
+        ttk.Entry(row, textvariable=self.picture_p1_var, width=5, state="disabled").pack(side="left")
         ttk.Label(row, text="p2:").pack(side="left", padx=(8, 2))
         self.picture_p2_var = tk.IntVar(value=0)
-        ttk.Entry(row, textvariable=self.picture_p2_var, width=5).pack(side="left")
-        ttk.Button(row, text="Send", command=self._set_picture_mode_raw).pack(side="left", padx=8)
+        ttk.Entry(row, textvariable=self.picture_p2_var, width=5, state="disabled").pack(side="left")
+        ttk.Button(row, text="Send", command=self._set_picture_mode_raw, state="disabled").pack(side="left", padx=8)
+        ttk.Label(row, text="disabled: locks up the OSD", foreground="#b00000").pack(side="left", padx=(4, 0))
 
         ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
         ttk.Label(
