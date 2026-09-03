@@ -202,12 +202,15 @@ class RayNeoDevice:
 
     # -- experimental operations -----------------------------------------
     def set_picture_mode(self, mode: int, p1: int = 0, p2: int = 0) -> bytes:
-        """EXPERIMENTAL -- see commands.COMMANDS[0x73]. The Android app
-        sends this as a 3-byte payload (mode, p1, p2), not a single value
-        byte; the exact wire layout isn't confirmed, so this sends mode as
-        the short-form val byte and p1/p2 as the following two payload
-        bytes -- a best guess at the framing, not a confirmed one."""
+        """EXPERIMENTAL -- see commands.COMMANDS[0x73]. ffalcon::XRService::
+        PanelColorAdjust builds its 3-byte extra payload as [0x00, p1, p2]
+        (explicitly zeroing the first extra byte, not DEFAULT_EXTRA) before
+        Send(cmd=0x73, val=mode, ptr, len=3) -- a previous version of this
+        method left byte[4] at DEFAULT_EXTRA (0x56) instead of 0x00, which
+        doesn't match the traced wire format and is the likely reason every
+        live attempt got a clean timeout rather than an ack."""
         pkt = bytearray(protocol.build_short(Command.PICTURE_MODE, mode))
+        pkt[4] = 0x00
         pkt[5] = p1
         pkt[6] = p2
         resp = self.send_raw(bytes(pkt))
