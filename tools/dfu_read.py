@@ -147,7 +147,8 @@ class DfuDevice:
             if blen == 0:
                 break
             if btype == 0x21 and blen >= 9:  # DFU functional descriptor
-                self.xfer_size = struct.unpack_from("<H", extra, i + 4)[0]
+                # layout: bLength,bDescriptorType,bmAttributes,wDetachTimeout(2),wTransferSize(2),bcdDFUVersion(2)
+                self.xfer_size = struct.unpack_from("<H", extra, i + 5)[0]
             i += blen
 
     # -- low-level DFU control requests -----------------------------------

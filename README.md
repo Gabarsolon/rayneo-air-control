@@ -28,9 +28,15 @@ anything in the firmware. This project starts over with an explicit
 confidence rating on every command, verified against the disassembly
 and, where possible, a live device.
 
-**This project never writes firmware.** It only speaks the existing
-runtime HID control channel — the same one the OEM app uses. There is
-no DFU/bootloader code path here and there won't be one added.
+**Runtime control never writes firmware.** `rayneo_control` itself only
+speaks the existing runtime HID channel — the same one the OEM app
+uses. Separately, `tools/dfu_write.py` exists as an explicit, clearly
+isolated research tool for probing the DFU write path directly against
+a real device (see [Investigating the bootloader](#investigating-the-bootloader)
+below) — it's opt-in, lives outside the CLI, and every write it has
+been used for so far has been rejected by the hardware itself. See
+[`docs/write-protection-findings.md`](docs/write-protection-findings.md)
+for the full trace.
 
 ## Protocol
 
@@ -114,6 +120,17 @@ fixing it safely would mean a Windows-side EDID override, never a
 firmware rewrite — but it's documented here since it's load-bearing
 context for anyone continuing this investigation.
 
+The raised black floor also traces to concrete static data: the RAM
+LUT buffer at `0x200074EC` is populated by nothing more exotic than
+the standard C-runtime `.data` startup copy in `Reset_Handler`
+(`0x08015470`), sourced from flash at `0x0805F79C` — six `0x5B40`-byte
+blocks (one per PX8618 mode) of structured, non-monotonic 32-bit
+entries consistent with baked-in PQ/HDR10 tone-mapping coefficients,
+not a simple gamma ramp. It's static per firmware build, which matches
+the observation that the gray floor persisted across firmware
+versions. Interpreting the entries further needs Pixelworks PX8618
+vendor documentation, which isn't available.
+
 ## Continuing the reverse engineering
 
 `rayneo scan` sends `val=0` to every command ID in `0x00..0xA4` and
@@ -122,7 +139,7 @@ easy to tell apart from real handlers (their own distinct response).
 Anything that stands out from the cluster and isn't in
 `commands.COMMANDS` yet is worth a disassembly pass — PRs welcome.
 
-## Investigating the bootloader (read-only)
+## Investigating the bootloader
 
 The DFU package for this device only ever covers the application region
 (`0x0800C000` onward) — the low 48KB (`0x08000000`–`0x0800C000`) isn't in
@@ -148,9 +165,52 @@ control commands needed to set up a read (`Set Address Pointer`,
 `Abort`), never a data payload. It's read-only by construction, not by
 promise.
 
+### DFU write-path research
+
+`tools/dfu_write.py` adds the erase/program primitives on top of
+`DfuDevice` — an explicit, separate opt-in for probing the write path
+against a real device. Every write attempt made with it so far has
+been cleanly rejected by the device (`errWRITE`, DFU status `0x03`),
+while erase and read both succeed. Disassembling the bootloader traced
+this to a real hardware condition, not a bug in this tool or a
+software policy check we're missing a handshake for:
+
+- The unlock/lock sequence (`0x0800339C`/`0x080033B8`) is completely
+  standard STM32 FPEC code — KEY1 (`0x45670123`) written directly,
+  KEY2 (`0xCDEF89AB`) computed as `KEY1 + (-0x77777778)` rather than
+  stored as a literal.
+- A live read of the FLASH peripheral registers (`0x40022000`+, the
+  same range the bootloader's own code dereferences, so safe to read)
+  shows the option register's low byte as `0x01` — since only `0xAA`
+  (disabled) and `0xCC` (level 2) are the documented "safe" values,
+  any other byte means **Read-Out Protection Level 1 is active**.
+- The programming routine (`0x08003338`, called via `0x08003430`)
+  checks `FLASH_SR` after every write and returns failure whenever the
+  `0xFE0000` error-flag bits are set — the signature of **write
+  protection (WRP)** rejecting the operation at the silicon level.
+- Neither of those is bypassable through USB DFU: the device exposes
+  only one DFU alt-setting (`@Internal Flash`), no `@Option Bytes`
+  interface, so there's no USB-reachable way to reconfigure either
+  protection.
+
+Full trace, including how RayNeo's own official web updater
+(`ota.rayneo.com`) *does* get writes through — a full mass-erase
+(`erase(0x41414141, ...)`, a sentinel for "erase everything" rather
+than a real address) as the documented, standard way STM32 chips clear
+both RDP and WRP as a side effect, before rewriting the whole image —
+is in [`docs/write-protection-findings.md`](docs/write-protection-findings.md).
+
 ## Safety
 
-- No DFU / firmware-write code path exists in this repo, intentionally.
+- The main CLI (`rayneo_control`) has no DFU / firmware-write code
+  path, intentionally — it only ever speaks the runtime HID channel.
+- `tools/dfu_write.py` is the one deliberate exception: an isolated,
+  clearly-labeled research tool, not wired into the CLI. Every round
+  trip it's been used for stages on real, previously-blank flash
+  (never real firmware content), verifies erase before writing, and
+  restores blank state after. Every actual write attempt has been
+  rejected by hardware protection before touching real data — see
+  above.
 - `rayneo raw` and `rayneo scan` only use the confirmed 0x66 short form.
 - The 0x88 raw-passthrough magic is documented in `protocol.py` but
   deliberately has no CLI command wired to it yet — it's the most
