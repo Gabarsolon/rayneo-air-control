@@ -47,15 +47,17 @@ COMMANDS = {
     0x00: ("STATUS", Confidence.CONFIRMED,
            "Handler at 0x08010EF0. Only header/uptime/build-date/refresh-rate "
            "fields are real; see protocol.parse_status() for the honest field map."),
-    0x09: ("BRIGHTNESS", Confidence.TRACED,
-           "ffalcon::XRService::PanelLunaSet. The Android app runs its UI index "
-           "through a lookup table (falls back to 0xFF if out of range) before "
-           "sending -- val is a small table index, not a smooth brightness byte. "
-           "Live-tested on taurus4p0: val=1 is dimmest, climbs normally through "
-           "val=4 (brightest), then val=5 drops back down again -- non-monotonic "
-           "past 4, and val=0 reads brighter than val=1 too. The glasses' OSD "
-           "offers 8 brightness levels total, so this 1-4 climb is likely only "
-           "part of the real curve; 0 and 5+ not fully mapped yet."),
+    0x09: ("BRIGHTNESS", Confidence.CONFIRMED,
+           "ffalcon::XRService::PanelLunaSet. val is a scrambled index into an "
+           "8-level table, not a smooth brightness byte -- see "
+           "BRIGHTNESS_LEVEL_TO_RAW below for the full raw->OSD-level mapping, "
+           "confirmed live against the glasses' own OSD readout. val=4 also "
+           "reads as max brightness in the OSD but leaves the glasses' own "
+           "physical OSD unable to keep controlling brightness afterward "
+           "-- a device-side issue, not a software one. val=8 reaches "
+           "the same visible max cleanly, so BRIGHTNESS_LEVEL_TO_RAW uses 8 for "
+           "level 7 and val=4 should be avoided entirely, not just treated as "
+           "an alternate route to max."),
     0x0D: ("BRIGHTNESS_SAVE", Confidence.TRACED,
            "ffalcon::XRService::PanelLunaSave. No value byte (val=0) -- persists "
            "whatever BRIGHTNESS was last set to."),
@@ -129,6 +131,29 @@ class Command(IntEnum):
     GAMMA_INDEX = 0x6D
     GAMUT_MODE = 0x6E
     PICTURE_MODE = 0x73
+
+
+# BRIGHTNESS (0x09) val -- OSD brightness level, confirmed live against the
+# glasses' own on-screen readout while sweeping val=0..8:
+#   val:      0  1  2  3  4       5  6  7  8
+#   OSD level:2  0  1  6  7(max)  3  4  5  7(max)
+# Scrambled, not a simple offset or reversal -- this is a real lookup table
+# on the device side, not a bug in this project's framing. val=4 also reads
+# as max brightness but leaves the glasses' own physical OSD unable to keep
+# controlling brightness afterward -- a device-side state issue, not a
+# software one. val=8 reaches the same visible max cleanly, so this inverse
+# mapping (OSD level -> val to send) deliberately uses 8 for level 7 and
+# never 4.
+BRIGHTNESS_LEVEL_TO_RAW = {
+    0: 1,
+    1: 2,
+    2: 0,
+    3: 5,
+    4: 6,
+    5: 7,
+    6: 3,
+    7: 8,  # not 4 -- see note above
+}
 
 
 # Highest handler-table index seen in the firmware (165 entries, 0x00..0xA4).

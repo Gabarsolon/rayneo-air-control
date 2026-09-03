@@ -22,7 +22,7 @@ from tkinter import scrolledtext, ttk
 from typing import Callable, Optional
 
 from . import protocol
-from .commands import COMMANDS, Confidence, DisplayMode, MAX_COMMAND_ID
+from .commands import BRIGHTNESS_LEVEL_TO_RAW, COMMANDS, Confidence, DisplayMode, MAX_COMMAND_ID
 from .device import RayNeoDevice
 
 try:
@@ -311,27 +311,24 @@ class RayNeoGUI:
         # BRIGHTNESS_SAVE (0x0D) writes to flash, so that stays a separate,
         # deliberate button rather than firing on every drag tick.
         #
-        # This is a small index into a lookup table, not a smooth 0-255
-        # brightness byte -- live-tested so far: 1=dimmest, climbing
-        # normally through 4=brightest, then 5 drops back down again
-        # (non-monotonic past 4). The glasses' own OSD offers 8 brightness
-        # levels, so 1-4 is likely only half the real range, not the whole
-        # curve -- widened to 0-9 (a little margin past the expected 0-7/1-8
-        # span) rather than locking out levels we haven't mapped yet.
+        # The raw device value is a scrambled table index, not a smooth
+        # brightness byte -- this slider shows/sends the friendly OSD level
+        # (0=dimmest..7=brightest) and translates it through
+        # commands.BRIGHTNESS_LEVEL_TO_RAW, confirmed live against the
+        # glasses' own on-screen readout. raw=4 also reads as max but leaves
+        # the glasses' physical OSD unable to keep controlling brightness
+        # afterward -- level 7 deliberately sends raw=8 instead, never 4.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(
-            row, text="Brightness (0x09)\n[1..4 climbs, 5 drops; 8 OSD levels total]",
-            width=24, justify="left",
-        ).pack(side="left")
-        self.brightness_var = tk.IntVar(value=2)
-        self.brightness_label = ttk.Label(row, text="2", width=4)
+        ttk.Label(row, text="Brightness (0x09)\n[OSD level 0-7]", width=24, justify="left").pack(side="left")
+        self.brightness_var = tk.IntVar(value=0)
+        self.brightness_label = ttk.Label(row, text="0", width=4)
         scale = ttk.Scale(
-            row, from_=0, to=9, orient="horizontal", variable=self.brightness_var,
+            row, from_=0, to=7, orient="horizontal", variable=self.brightness_var,
             command=self._on_brightness_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
-        self._bind_scale_keys(scale, 0, 9, step=1, page=1)
+        self._bind_scale_keys(scale, 0, 7, step=1, page=1)
         self.brightness_label.pack(side="left", padx=(0, 4))
         ttk.Button(row, text="Save (0x0D)", command=self._save_brightness).pack(side="left", padx=4)
 
@@ -422,9 +419,12 @@ class RayNeoGUI:
 
         def send(lv: int) -> bytes:
             with RayNeoDevice() as dev:
-                return dev.set_brightness(lv)
+                return dev.set_brightness_level(lv)
 
-        self._apply_live("brightness", level, send, lambda lv: f"brightness -> {lv}")
+        self._apply_live(
+            "brightness", level, send,
+            lambda lv: f"brightness -> OSD level {lv} (raw {BRIGHTNESS_LEVEL_TO_RAW[lv]})",
+        )
 
     def _save_brightness(self) -> None:
         self._log("saving brightness (0x0D)...")

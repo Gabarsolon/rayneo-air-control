@@ -98,14 +98,27 @@ class RayNeoDevice:
 
     # -- traced operations (see commands.py; recovered from the Android
     #    app's native SDK, not yet exercised live from this project) ------
-    def set_brightness(self, level: int) -> bytes:
-        """TRACED -- see commands.COMMANDS[0x09]. The OEM app runs its UI
-        index through a lookup table before sending; the raw scale this
-        expects isn't known, so start low and watch the glasses."""
-        resp = self.send(Command.BRIGHTNESS, level)
+    def set_brightness(self, raw: int) -> bytes:
+        """CONFIRMED -- see commands.COMMANDS[0x09]. `raw` is the literal
+        device-side table index, NOT the OSD level -- e.g. raw=3 shows as
+        OSD level 6. Use set_brightness_level() unless you specifically
+        want to poke the raw index. raw=4 also reads as max brightness but
+        leaves the glasses' own physical OSD unable to keep controlling
+        brightness afterward -- a device-side issue, not a software one.
+        Avoid it; use raw=8 (or set_brightness_level(7)) for max instead."""
+        resp = self.send(Command.BRIGHTNESS, raw)
         if resp is None:
             raise TimeoutError("no response to BRIGHTNESS command")
         return resp
+
+    def set_brightness_level(self, level: int) -> bytes:
+        """CONFIRMED -- friendly wrapper around set_brightness() that
+        translates an OSD brightness level (0=dimmest..7=brightest) through
+        commands.BRIGHTNESS_LEVEL_TO_RAW before sending, so the level you
+        pass here matches what the glasses' own OSD shows."""
+        if level not in commands.BRIGHTNESS_LEVEL_TO_RAW:
+            raise ValueError(f"brightness level must be 0-7, got {level!r}")
+        return self.set_brightness(commands.BRIGHTNESS_LEVEL_TO_RAW[level])
 
     def save_brightness(self) -> bytes:
         """TRACED -- see commands.COMMANDS[0x0D]. No value byte; persists
