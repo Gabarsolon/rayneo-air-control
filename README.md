@@ -113,7 +113,7 @@ notes live in [`rayneo_control/commands.py`](rayneo_control/commands.py).
 | `0x29`/`0x54` | PANEL_HDR10_CHANGE | traced | `hid_call_panel_hdr10_change`, value semantics unresolved |
 | `0x48` | AUDIO_TUBE_MODE | traced | audio routing, not display |
 | `0x49` | AUDIO_MODE | traced | adjacent to 0x48, distinct handler |
-| `0x50` | VOLUME | traced | |
+| `0x50` | VOLUME | confirmed | val=0..12 (13 OSD levels, not a percentage) |
 | `0x66` | REBOOT_TO_BOOTLOADER | traced | software DFU entry, no button-hold |
 | `0x6D` | GAMMA_INDEX | experimental | indirects through `*(0x2005A090)+0x30`; returns -1 if null |
 | `0x6E` | GAMUT_MODE | experimental | indirects through `*(0x2005A090)+0x34`; returns -1 if null |

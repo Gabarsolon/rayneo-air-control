@@ -75,10 +75,10 @@ COMMANDS = {
            "ffalcon::XRService::SetAudioMode. Distinct from 0x48 AUDIO_TUBE_MODE below. "
            "Likely the OSD's 'Audio effect: Standard/Whisper/Surround' (3 values) --"
            "unconfirmed correspondence, not verified against the actual value bytes."),
-    0x50: ("VOLUME", Confidence.TRACED,
+    0x50: ("VOLUME", Confidence.CONFIRMED,
            "ffalcon::XRService::SetAudioVolume. Not a 0-100 percentage -- the "
-           "glasses' OSD offers 13 discrete volume levels, so val is almost "
-           "certainly a small index like BRIGHTNESS above, not tested live yet."),
+           "glasses' OSD offers 13 discrete volume levels, val=0..12, confirmed "
+           "live and working correctly across that range."),
     0x54: ("PANEL_HDR10_CHANGE_B", Confidence.TRACED,
            "Alias of 0x29 -- both dispatch to hid_call_panel_hdr10_change."),
     0x48: ("AUDIO_TUBE_MODE", Confidence.TRACED,

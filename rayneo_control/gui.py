@@ -343,15 +343,15 @@ class RayNeoGUI:
         # down the exact valid range/order the way brightness's was.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Volume (0x50)\n[13 OSD levels, untested]", width=24, justify="left").pack(side="left")
+        ttk.Label(row, text="Volume (0x50)\n[0-12, 13 OSD levels]", width=24, justify="left").pack(side="left")
         self.volume_var = tk.IntVar(value=6)
         self.volume_label = ttk.Label(row, text="6", width=4)
         scale = ttk.Scale(
-            row, from_=0, to=13, orient="horizontal", variable=self.volume_var,
+            row, from_=0, to=12, orient="horizontal", variable=self.volume_var,
             command=self._on_volume_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
-        self._bind_scale_keys(scale, 0, 13, step=1, page=1)
+        self._bind_scale_keys(scale, 0, 12, step=1, page=1)
         self.volume_label.pack(side="left", padx=(0, 4))
 
         # -- Refresh rate (two cmd_ids, not a value byte; applies on click) --
