@@ -57,6 +57,7 @@ class RayNeoGUI:
         # touch from any other thread.
         self._work_q: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._tray: Optional["pystray.Icon"] = None
+        self._debounce_ids: dict[str, str] = {}
 
         self._build_ui()
         if _HAVE_TRAY:
@@ -86,6 +87,15 @@ class RayNeoGUI:
                 self._work_q.put(lambda: on_done(result))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _debounce(self, key: str, delay_ms: int, fn: Callable[[], None]) -> None:
+        """Collapse rapid-fire calls (e.g. dragging a slider) under `key`
+        into one call `delay_ms` after the last one. Keeps live-updating
+        controls from flooding the device with a send per pixel of drag."""
+        pending = self._debounce_ids.pop(key, None)
+        if pending is not None:
+            self.root.after_cancel(pending)
+        self._debounce_ids[key] = self.root.after(delay_ms, fn)
 
     def _poll_queue(self) -> None:
         try:
@@ -206,8 +216,9 @@ class RayNeoGUI:
             wraplength=560, foreground="#a06000", justify="left",
         ).pack(padx=8, pady=(12, 8), anchor="w")
 
-        # -- Brightness (slider, live value label, explicit Set so dragging
-        # doesn't spam the device) --------------------------------------
+        # -- Brightness (slider, applies live/debounced -- no Set button).
+        # BRIGHTNESS_SAVE (0x0D) writes to flash, so that stays a separate,
+        # deliberate button rather than firing on every drag tick. --------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Brightness (0x09)", width=20).pack(side="left")
@@ -215,15 +226,13 @@ class RayNeoGUI:
         self.brightness_label = ttk.Label(row, text="128", width=4)
         scale = ttk.Scale(
             row, from_=0, to=255, orient="horizontal", variable=self.brightness_var,
-            command=lambda v: self.brightness_label.configure(text=str(int(float(v)))),
+            command=self._on_brightness_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
         self.brightness_label.pack(side="left", padx=(0, 4))
-        self.brightness_save = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row, text="save (0x0D)", variable=self.brightness_save).pack(side="left", padx=4)
-        ttk.Button(row, text="Set", command=self._set_brightness).pack(side="left", padx=4)
+        ttk.Button(row, text="Save (0x0D)", command=self._save_brightness).pack(side="left", padx=4)
 
-        # -- Volume (slider) ------------------------------------------------
+        # -- Volume (slider, applies live/debounced) ------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Volume (0x50)", width=20).pack(side="left")
@@ -231,56 +240,63 @@ class RayNeoGUI:
         self.volume_label = ttk.Label(row, text="50", width=4)
         scale = ttk.Scale(
             row, from_=0, to=100, orient="horizontal", variable=self.volume_var,
-            command=lambda v: self.volume_label.configure(text=str(int(float(v)))),
+            command=self._on_volume_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
         self.volume_label.pack(side="left", padx=(0, 4))
-        ttk.Button(row, text="Set", command=self._set_volume).pack(side="left", padx=4)
 
-        # -- Refresh rate (two cmd_ids, not a value byte) -------------------
+        # -- Refresh rate (two cmd_ids, not a value byte; applies on click) --
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Refresh rate (0x20/0x21)", width=20).pack(side="left")
         self.refresh_rate_var = tk.IntVar(value=60)
         for hz in (60, 120):
-            ttk.Radiobutton(row, text=f"{hz}Hz", value=hz, variable=self.refresh_rate_var).pack(side="left", padx=4)
-        ttk.Button(row, text="Set", command=self._set_refresh_rate).pack(side="left", padx=4)
+            ttk.Radiobutton(
+                row, text=f"{hz}Hz", value=hz, variable=self.refresh_rate_var, command=self._set_refresh_rate,
+            ).pack(side="left", padx=4)
 
-        # -- Audio effect [OSD: Standard/Whisper/Surround] ------------------
+        # -- Audio effect [OSD: Standard/Whisper/Surround] -- applies on select
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Audio effect (0x49)\n[Standard/Whisper/Surround]", width=20, justify="left").pack(
             side="left"
         )
         self.audio_mode_var = tk.StringVar(value="Standard")
-        ttk.Combobox(
+        audio_combo = ttk.Combobox(
             row, textvariable=self.audio_mode_var, state="readonly", width=12,
             values=["Standard", "Whisper", "Surround"],
-        ).pack(side="left", padx=4)
-        ttk.Button(row, text="Set", command=self._set_audio_mode).pack(side="left", padx=4)
+        )
+        audio_combo.pack(side="left", padx=4)
+        audio_combo.bind("<<ComboboxSelected>>", lambda e: self._set_audio_mode())
 
-        # -- Sound Tube [OSD: Off/On] ----------------------------------------
+        # -- Sound Tube [OSD: Off/On] -- applies on toggle --------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Sound Tube (0x48)\n[Off/On]", width=20, justify="left").pack(side="left")
         self.audio_tube_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row, text="on", variable=self.audio_tube_var).pack(side="left", padx=4)
-        ttk.Button(row, text="Set", command=self._set_audio_tube).pack(side="left", padx=4)
+        ttk.Checkbutton(row, text="on", variable=self.audio_tube_var, command=self._set_audio_tube).pack(
+            side="left", padx=4
+        )
 
-        # -- Picture mode + Color enhancement [OSD, both via 0x73] ----------
+        # -- Picture mode + Color enhancement [OSD, both via 0x73] -- applies
+        # on either changing ---------------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Picture mode (0x73)\n[Standard/Movie/Eye Comfort]", width=20, justify="left").pack(
             side="left"
         )
         self.picture_mode_name_var = tk.StringVar(value="Standard")
-        ttk.Combobox(
+        picture_combo = ttk.Combobox(
             row, textvariable=self.picture_mode_name_var, state="readonly", width=12,
             values=["Standard", "Movie", "Eye Comfort"],
-        ).pack(side="left", padx=4)
+        )
+        picture_combo.pack(side="left", padx=4)
+        picture_combo.bind("<<ComboboxSelected>>", lambda e: self._set_picture_mode_friendly())
         self.color_enhance_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row, text="color enhancement", variable=self.color_enhance_var).pack(side="left", padx=8)
-        ttk.Button(row, text="Set", command=self._set_picture_mode_friendly).pack(side="left", padx=4)
+        ttk.Checkbutton(
+            row, text="color enhancement", variable=self.color_enhance_var,
+            command=self._set_picture_mode_friendly,
+        ).pack(side="left", padx=8)
 
         ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
         ttk.Label(
@@ -291,27 +307,41 @@ class RayNeoGUI:
         ).pack(padx=8, pady=(0, 6), anchor="w")
         ttk.Button(frame, text="Reboot to DFU", command=self._reboot_dfu).pack(padx=8, pady=(0, 8), anchor="w")
 
-    def _set_brightness(self) -> None:
-        level = self.brightness_var.get()
-        save = self.brightness_save.get()
-        self._log(f"setting brightness -> {level}{' (+ save)' if save else ''}...")
+    def _on_brightness_change(self, value: str) -> None:
+        level = int(float(value))
+        self.brightness_label.configure(text=str(level))
+        # debounced: only the last value in a burst of drag events actually
+        # gets sent, ~120ms after dragging stops -- not one send per pixel.
+        self._debounce("brightness", 120, lambda: self._send_brightness(level))
 
+    def _send_brightness(self, level: int) -> None:
         def work() -> bytes:
             with RayNeoDevice() as dev:
-                resp = dev.set_brightness(level)
-                if save:
-                    dev.save_brightness()
-                return resp
+                return dev.set_brightness(level)
 
         def done(resp: bytes) -> None:
             self._append_log(f"brightness -> {level} ack: {resp.hex()}")
 
         self._run_async(work, done)
 
-    def _set_volume(self) -> None:
-        level = self.volume_var.get()
-        self._log(f"setting volume -> {level}...")
+    def _save_brightness(self) -> None:
+        self._log("saving brightness (0x0D)...")
 
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.save_brightness()
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"brightness saved ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _on_volume_change(self, value: str) -> None:
+        level = int(float(value))
+        self.volume_label.configure(text=str(level))
+        self._debounce("volume", 120, lambda: self._send_volume(level))
+
+    def _send_volume(self, level: int) -> None:
         def work() -> bytes:
             with RayNeoDevice() as dev:
                 return dev.set_volume(level)
