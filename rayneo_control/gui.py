@@ -308,8 +308,6 @@ class RayNeoGUI:
             )
 
         # -- Brightness (slider, applies live/debounced -- no Set button).
-        # BRIGHTNESS_SAVE (0x0D) writes to flash, so that stays a separate,
-        # deliberate button rather than firing on every drag tick.
         #
         # The raw device value is a scrambled table index, not a smooth
         # brightness byte -- this slider shows/sends the friendly OSD level
@@ -330,7 +328,6 @@ class RayNeoGUI:
         scale.pack(side="left", fill="x", expand=True, padx=4)
         self._bind_scale_keys(scale, 0, 7, step=1, page=1)
         self.brightness_label.pack(side="left", padx=(0, 4))
-        ttk.Button(row, text="Save (0x0D)", command=self._save_brightness).pack(side="left", padx=4)
 
         # -- Volume (slider, applies live/debounced) ------------------------
         # Not a 0-100 percentage -- the OSD has 13 discrete volume levels, so
@@ -425,18 +422,6 @@ class RayNeoGUI:
             "brightness", level, send,
             lambda lv: f"brightness -> OSD level {lv} (raw {BRIGHTNESS_LEVEL_TO_RAW[lv]})",
         )
-
-    def _save_brightness(self) -> None:
-        self._log("saving brightness (0x0D)...")
-
-        def work() -> bytes:
-            with RayNeoDevice() as dev:
-                return dev.save_brightness()
-
-        def done(resp: bytes) -> None:
-            self._append_log(f"brightness saved ack: {resp.hex()}")
-
-        self._run_async(work, done)
 
     def _on_volume_change(self, value: str) -> None:
         level = int(float(value))
