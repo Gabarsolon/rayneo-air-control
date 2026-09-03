@@ -307,6 +307,16 @@ class RayNeoGUI:
                 side="left", padx=4
             )
 
+        # -- 3D mode [0x06/0x07 explicit set, 0x30 toggle] -- matches the
+        # physical brightness+volume button combo used to switch modes while
+        # the glasses are on.
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="3D mode (0x06/0x07/0x30)", width=20).pack(side="left")
+        ttk.Button(row, text="3D", command=self._switch_to_3d).pack(side="left", padx=4)
+        ttk.Button(row, text="2D", command=self._switch_to_2d).pack(side="left", padx=4)
+        ttk.Button(row, text="Toggle (SBS)", command=self._switch_side_by_side).pack(side="left", padx=4)
+
         # -- Brightness (slider, applies live/debounced -- no Set button).
         #
         # The raw device value is a scrambled table index, not a smooth
@@ -504,6 +514,42 @@ class RayNeoGUI:
 
         def done(resp: bytes) -> None:
             self._append_log(f"reboot-to-dfu ack: {resp.hex()} (glasses should now be in DFU mode)")
+
+        self._run_async(work, done)
+
+    def _switch_to_3d(self) -> None:
+        self._log("switching to 3D mode...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.switch_to_3d()
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"3D mode ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _switch_to_2d(self) -> None:
+        self._log("switching to 2D mode...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.switch_to_2d()
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"2D mode ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _switch_side_by_side(self) -> None:
+        self._log("toggling side-by-side (3D/2D)...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.switch_side_by_side()
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"side-by-side toggle ack: {resp.hex()}")
 
         self._run_async(work, done)
 

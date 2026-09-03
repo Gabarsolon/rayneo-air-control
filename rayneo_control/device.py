@@ -174,6 +174,32 @@ class RayNeoDevice:
             raise TimeoutError("no response to REBOOT_TO_BOOTLOADER command")
         return resp
 
+    def switch_to_3d(self) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x06]. Explicit set to 3D mode,
+        no value byte. Matches the physical brightness+volume button combo
+        used to switch modes while the glasses are on."""
+        resp = self.send(Command.SWITCH_TO_3D)
+        if resp is None:
+            raise TimeoutError("no response to SWITCH_TO_3D command")
+        return resp
+
+    def switch_to_2d(self) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x07]. Explicit set to 2D mode,
+        no value byte."""
+        resp = self.send(Command.SWITCH_TO_2D)
+        if resp is None:
+            raise TimeoutError("no response to SWITCH_TO_2D command")
+        return resp
+
+    def switch_side_by_side(self) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x30]. An actual toggle (flips
+        current 2D/3D state) rather than an explicit set like switch_to_3d()/
+        switch_to_2d() above, no value byte."""
+        resp = self.send(Command.SWITCH_SIDE_BY_SIDE)
+        if resp is None:
+            raise TimeoutError("no response to SWITCH_SIDE_BY_SIDE command")
+        return resp
+
     # -- experimental operations -----------------------------------------
     def set_picture_mode(self, mode: int, p1: int = 0, p2: int = 0) -> bytes:
         """EXPERIMENTAL -- see commands.COMMANDS[0x73]. The Android app

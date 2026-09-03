@@ -109,16 +109,31 @@ COMMANDS = {
            "most likely simply not wired up on this particular firmware build, "
            "not a wrong byte-layout guess. Don't retry variations against a real "
            "device -- a command the firmware won't ack isn't one to keep probing."),
+    0x06: ("SWITCH_TO_3D", Confidence.TRACED,
+           "ffalcon::XRService::SwitchTo3D. No value byte -- explicit set, not a "
+           "toggle. Matches the physical brightness+volume button combo used to "
+           "switch into 3D mode while the glasses are on."),
+    0x07: ("SWITCH_TO_2D", Confidence.TRACED,
+           "ffalcon::XRService::SwitchTo2D. No value byte -- explicit set, the "
+           "other half of SWITCH_TO_3D above."),
+    0x30: ("SWITCH_SIDE_BY_SIDE", Confidence.TRACED,
+           "ffalcon::XRService::SwitchSideBySide. No value byte -- an actual "
+           "toggle (flips current state) rather than an explicit set like 0x06/"
+           "0x07 above. Closer to matching a single button-combo press if "
+           "SWITCH_TO_3D/SWITCH_TO_2D turn out not to."),
 }
 
 
 class Command(IntEnum):
     STATUS = 0x00
+    SWITCH_TO_3D = 0x06
+    SWITCH_TO_2D = 0x07
     BRIGHTNESS = 0x09
     BRIGHTNESS_SAVE = 0x0D
     PANEL_POWER_ON = 0x0E
     PANEL_POWER_OFF = 0x0F
     PANEL_POWER_SWAP = 0x12
+    SWITCH_SIDE_BY_SIDE = 0x30
     REFRESH_RATE_60 = 0x20
     REFRESH_RATE_120 = 0x21
     DISPLAY_MODE = 0x1A
