@@ -381,8 +381,12 @@ class RayNeoGUI:
             side="left", padx=4
         )
 
-        # -- Picture mode + Color enhancement [OSD, both via 0x73] -- applies
-        # on either changing ---------------------------------------------
+        # -- Picture mode + Color enhancement [OSD, both via 0x73] -- DISABLED:
+        # confirmed live that this device never acks 0x73 (clean timeout on
+        # two different values, not a malformed-response error) -- see
+        # commands.COMMANDS[0x73]. Left visible rather than removed so the
+        # controls this OSD item would need are still documented, just not
+        # clickable, until/unless a firmware build that implements it shows up.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Picture mode (0x73)\n[Standard/Movie/Eye Comfort]", width=20, justify="left").pack(
@@ -390,16 +394,15 @@ class RayNeoGUI:
         )
         self.picture_mode_name_var = tk.StringVar(value="Standard")
         picture_combo = ttk.Combobox(
-            row, textvariable=self.picture_mode_name_var, state="readonly", width=12,
+            row, textvariable=self.picture_mode_name_var, state="disabled", width=12,
             values=["Standard", "Movie", "Eye Comfort"],
         )
         picture_combo.pack(side="left", padx=4)
-        picture_combo.bind("<<ComboboxSelected>>", lambda e: self._set_picture_mode_friendly())
         self.color_enhance_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            row, text="color enhancement", variable=self.color_enhance_var,
-            command=self._set_picture_mode_friendly,
+            row, text="color enhancement", variable=self.color_enhance_var, state="disabled",
         ).pack(side="left", padx=8)
+        ttk.Label(row, text="not working on this device", foreground="#b00000").pack(side="left", padx=(4, 0))
 
         ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
         ttk.Label(
