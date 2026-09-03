@@ -115,6 +115,29 @@ class RayNeoDevice:
             raise TimeoutError("no response to BRIGHTNESS_SAVE command")
         return resp
 
+    def set_refresh_rate(self, hz: int) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x20]/[0x21]. Unlike the other
+        commands here, the rate isn't a value byte -- it's a different
+        cmd_id per rate. Only 60 and 120 are known; anything else raises."""
+        if hz == 60:
+            cmd = Command.REFRESH_RATE_60
+        elif hz == 120:
+            cmd = Command.REFRESH_RATE_120
+        else:
+            raise ValueError(f"unknown refresh rate {hz!r} -- only 60 and 120 are traced")
+        resp = self.send(cmd)
+        if resp is None:
+            raise TimeoutError("no response to REFRESH_RATE command")
+        return resp
+
+    def set_audio_tube_mode(self, on: bool) -> bytes:
+        """TRACED -- see commands.COMMANDS[0x48]. Best guess: the OSD's
+        'Sound Tube: Off/On' toggle."""
+        resp = self.send(Command.AUDIO_TUBE_MODE, 1 if on else 0)
+        if resp is None:
+            raise TimeoutError("no response to AUDIO_TUBE_MODE command")
+        return resp
+
     def set_audio_mode(self, mode: int) -> bytes:
         """TRACED -- see commands.COMMANDS[0x49]. Distinct from the
         AUDIO_TUBE_MODE (0x48) command below."""

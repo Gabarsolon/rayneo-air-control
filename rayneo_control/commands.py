@@ -58,16 +58,25 @@ COMMANDS = {
     0x0E: ("PANEL_POWER_ON", Confidence.TRACED, "ffalcon::XRService::PanelPowerOn. No value byte."),
     0x0F: ("PANEL_POWER_OFF", Confidence.TRACED, "ffalcon::XRService::PanelPowerOff. No value byte."),
     0x12: ("PANEL_POWER_SWAP", Confidence.TRACED, "ffalcon::XRService::PanelPowerSwap. No value byte."),
+    0x20: ("REFRESH_RATE_60", Confidence.TRACED,
+           "ffalcon::XRService::PanelFrameRateSet(60). Not a value byte -- the cmd_id "
+           "itself changes per rate (0x20 vs 0x21 below), val=0 either way. Matches "
+           "the glasses' own OSD: Refresh rate 60Hz/120Hz."),
+    0x21: ("REFRESH_RATE_120", Confidence.TRACED,
+           "ffalcon::XRService::PanelFrameRateSet(120). See 0x20 -- same call site, "
+           "the other branch."),
     0x29: ("PANEL_HDR10_CHANGE_A", Confidence.TRACED,
            "Handler at 0x08011EEC (hid_call_panel_hdr10_change). Same handler as 0x54."),
     0x49: ("AUDIO_MODE", Confidence.TRACED,
-           "ffalcon::XRService::SetAudioMode. Distinct from 0x48 AUDIO_TUBE_MODE below "
-           "-- adjacent id, different handler, semantics not otherwise distinguished yet."),
+           "ffalcon::XRService::SetAudioMode. Distinct from 0x48 AUDIO_TUBE_MODE below. "
+           "Likely the OSD's 'Audio effect: Standard/Whisper/Surround' (3 values) --"
+           "unconfirmed correspondence, not verified against the actual value bytes."),
     0x50: ("VOLUME", Confidence.TRACED, "ffalcon::XRService::SetAudioVolume. val = volume level."),
     0x54: ("PANEL_HDR10_CHANGE_B", Confidence.TRACED,
            "Alias of 0x29 -- both dispatch to hid_call_panel_hdr10_change."),
     0x48: ("AUDIO_TUBE_MODE", Confidence.TRACED,
-           "Handler at 0x08011BD8 (hid_call_audio_tube_mode). Audio routing, not display."),
+           "Handler at 0x08011BD8 (hid_call_audio_tube_mode). Audio routing, not display. "
+           "Likely the OSD's 'Sound Tube: Off/On' -- unconfirmed correspondence."),
     0x66: ("REBOOT_TO_BOOTLOADER", Confidence.TRACED,
            "ffalcon::XRService::RebootAndBootloader. No value byte (val=0). Software "
            "DFU-entry -- the answer to 'is there a command instead of holding both "
@@ -84,7 +93,11 @@ COMMANDS = {
            "not a single value byte like the others above. Send() call site is "
            "understood; the exact byte layout on the wire (which of mode/p1/p2 "
            "lands where in the frame) is not yet confirmed, hence EXPERIMENTAL "
-           "rather than TRACED despite having a real disassembled call site."),
+           "rather than TRACED despite having a real disassembled call site. Best "
+           "guess: mode = OSD 'Picture mode' (Standard/Movie/Eye Comfort), "
+           "p1 = OSD 'Color enhancement' (Off/On) -- no separate XRService method "
+           "for color enhancement exists, so it's likely folded into this same call. "
+           "Unconfirmed."),
 }
 
 
@@ -95,6 +108,8 @@ class Command(IntEnum):
     PANEL_POWER_ON = 0x0E
     PANEL_POWER_OFF = 0x0F
     PANEL_POWER_SWAP = 0x12
+    REFRESH_RATE_60 = 0x20
+    REFRESH_RATE_120 = 0x21
     DISPLAY_MODE = 0x1A
     PANEL_HDR10_CHANGE_A = 0x29
     AUDIO_MODE = 0x49

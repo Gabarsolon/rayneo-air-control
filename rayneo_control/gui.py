@@ -195,37 +195,92 @@ class RayNeoGUI:
     # -- Traced tab (brightness/volume/audio/DFU-reboot) -----------------
     def _build_traced_tab(self, nb: ttk.Notebook) -> None:
         frame = ttk.Frame(nb)
-        nb.add(frame, text="Brightness/Volume")
+        nb.add(frame, text="Display && Audio")
         ttk.Label(
             frame,
             text="TRACED, not CONFIRMED: recovered from the RayNeo Android app's "
                  "native SDK (ffalcon::XRService), not exercised live from this "
-                 "project before. Watch/listen to the glasses after sending.",
+                 "project before. Watch/listen to the glasses after sending. Labels "
+                 "in [brackets] are this project's best guess at the matching item "
+                 "in the glasses' own OSD menu, not a confirmed correspondence.",
             wraplength=560, foreground="#a06000", justify="left",
         ).pack(padx=8, pady=(12, 8), anchor="w")
 
+        # -- Brightness (slider, live value label, explicit Set so dragging
+        # doesn't spam the device) --------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Brightness (0x09)", width=20).pack(side="left")
-        self.brightness_var = tk.StringVar(value="128")
-        ttk.Entry(row, textvariable=self.brightness_var, width=6).pack(side="left", padx=4)
+        self.brightness_var = tk.IntVar(value=128)
+        self.brightness_label = ttk.Label(row, text="128", width=4)
+        scale = ttk.Scale(
+            row, from_=0, to=255, orient="horizontal", variable=self.brightness_var,
+            command=lambda v: self.brightness_label.configure(text=str(int(float(v)))),
+        )
+        scale.pack(side="left", fill="x", expand=True, padx=4)
+        self.brightness_label.pack(side="left", padx=(0, 4))
         self.brightness_save = tk.BooleanVar(value=False)
         ttk.Checkbutton(row, text="save (0x0D)", variable=self.brightness_save).pack(side="left", padx=4)
         ttk.Button(row, text="Set", command=self._set_brightness).pack(side="left", padx=4)
 
+        # -- Volume (slider) ------------------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
         ttk.Label(row, text="Volume (0x50)", width=20).pack(side="left")
-        self.volume_var = tk.StringVar(value="50")
-        ttk.Entry(row, textvariable=self.volume_var, width=6).pack(side="left", padx=4)
+        self.volume_var = tk.IntVar(value=50)
+        self.volume_label = ttk.Label(row, text="50", width=4)
+        scale = ttk.Scale(
+            row, from_=0, to=100, orient="horizontal", variable=self.volume_var,
+            command=lambda v: self.volume_label.configure(text=str(int(float(v)))),
+        )
+        scale.pack(side="left", fill="x", expand=True, padx=4)
+        self.volume_label.pack(side="left", padx=(0, 4))
         ttk.Button(row, text="Set", command=self._set_volume).pack(side="left", padx=4)
 
+        # -- Refresh rate (two cmd_ids, not a value byte) -------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Audio mode (0x49)", width=20).pack(side="left")
-        self.audio_mode_var = tk.StringVar(value="0")
-        ttk.Entry(row, textvariable=self.audio_mode_var, width=6).pack(side="left", padx=4)
+        ttk.Label(row, text="Refresh rate (0x20/0x21)", width=20).pack(side="left")
+        self.refresh_rate_var = tk.IntVar(value=60)
+        for hz in (60, 120):
+            ttk.Radiobutton(row, text=f"{hz}Hz", value=hz, variable=self.refresh_rate_var).pack(side="left", padx=4)
+        ttk.Button(row, text="Set", command=self._set_refresh_rate).pack(side="left", padx=4)
+
+        # -- Audio effect [OSD: Standard/Whisper/Surround] ------------------
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Audio effect (0x49)\n[Standard/Whisper/Surround]", width=20, justify="left").pack(
+            side="left"
+        )
+        self.audio_mode_var = tk.StringVar(value="Standard")
+        ttk.Combobox(
+            row, textvariable=self.audio_mode_var, state="readonly", width=12,
+            values=["Standard", "Whisper", "Surround"],
+        ).pack(side="left", padx=4)
         ttk.Button(row, text="Set", command=self._set_audio_mode).pack(side="left", padx=4)
+
+        # -- Sound Tube [OSD: Off/On] ----------------------------------------
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Sound Tube (0x48)\n[Off/On]", width=20, justify="left").pack(side="left")
+        self.audio_tube_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row, text="on", variable=self.audio_tube_var).pack(side="left", padx=4)
+        ttk.Button(row, text="Set", command=self._set_audio_tube).pack(side="left", padx=4)
+
+        # -- Picture mode + Color enhancement [OSD, both via 0x73] ----------
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=6)
+        ttk.Label(row, text="Picture mode (0x73)\n[Standard/Movie/Eye Comfort]", width=20, justify="left").pack(
+            side="left"
+        )
+        self.picture_mode_name_var = tk.StringVar(value="Standard")
+        ttk.Combobox(
+            row, textvariable=self.picture_mode_name_var, state="readonly", width=12,
+            values=["Standard", "Movie", "Eye Comfort"],
+        ).pack(side="left", padx=4)
+        self.color_enhance_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row, text="color enhancement", variable=self.color_enhance_var).pack(side="left", padx=8)
+        ttk.Button(row, text="Set", command=self._set_picture_mode_friendly).pack(side="left", padx=4)
 
         ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
         ttk.Label(
@@ -237,11 +292,7 @@ class RayNeoGUI:
         ttk.Button(frame, text="Reboot to DFU", command=self._reboot_dfu).pack(padx=8, pady=(0, 8), anchor="w")
 
     def _set_brightness(self) -> None:
-        try:
-            level = int(self.brightness_var.get(), 0)
-        except ValueError:
-            self._append_log(f"invalid brightness level: {self.brightness_var.get()!r}")
-            return
+        level = self.brightness_var.get()
         save = self.brightness_save.get()
         self._log(f"setting brightness -> {level}{' (+ save)' if save else ''}...")
 
@@ -258,11 +309,7 @@ class RayNeoGUI:
         self._run_async(work, done)
 
     def _set_volume(self) -> None:
-        try:
-            level = int(self.volume_var.get(), 0)
-        except ValueError:
-            self._append_log(f"invalid volume level: {self.volume_var.get()!r}")
-            return
+        level = self.volume_var.get()
         self._log(f"setting volume -> {level}...")
 
         def work() -> bytes:
@@ -274,20 +321,62 @@ class RayNeoGUI:
 
         self._run_async(work, done)
 
+    def _set_refresh_rate(self) -> None:
+        hz = self.refresh_rate_var.get()
+        self._log(f"setting refresh rate -> {hz}Hz...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.set_refresh_rate(hz)
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"refresh rate -> {hz}Hz ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    _AUDIO_MODE_VALUES = {"Standard": 0, "Whisper": 1, "Surround": 2}
+
     def _set_audio_mode(self) -> None:
-        try:
-            mode = int(self.audio_mode_var.get(), 0)
-        except ValueError:
-            self._append_log(f"invalid audio mode: {self.audio_mode_var.get()!r}")
-            return
-        self._log(f"setting audio mode -> {mode}...")
+        name = self.audio_mode_var.get()
+        mode = self._AUDIO_MODE_VALUES[name]
+        self._log(f"setting audio effect -> {name} ({mode})...")
 
         def work() -> bytes:
             with RayNeoDevice() as dev:
                 return dev.set_audio_mode(mode)
 
         def done(resp: bytes) -> None:
-            self._append_log(f"audio mode -> {mode} ack: {resp.hex()}")
+            self._append_log(f"audio effect -> {name} ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    def _set_audio_tube(self) -> None:
+        on = self.audio_tube_var.get()
+        self._log(f"setting sound tube -> {'on' if on else 'off'}...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.set_audio_tube_mode(on)
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"sound tube -> {'on' if on else 'off'} ack: {resp.hex()}")
+
+        self._run_async(work, done)
+
+    _PICTURE_MODE_VALUES = {"Standard": 0, "Movie": 1, "Eye Comfort": 2}
+
+    def _set_picture_mode_friendly(self) -> None:
+        name = self.picture_mode_name_var.get()
+        mode = self._PICTURE_MODE_VALUES[name]
+        enhance = 1 if self.color_enhance_var.get() else 0
+        self._log(f"setting picture mode -> {name} ({mode}), color enhancement={enhance}...")
+
+        def work() -> bytes:
+            with RayNeoDevice() as dev:
+                return dev.set_picture_mode(mode, enhance, 0)
+
+        def done(resp: bytes) -> None:
+            self._append_log(f"picture mode -> {name}, enhancement={enhance} ack: {resp.hex()}")
 
         self._run_async(work, done)
 
