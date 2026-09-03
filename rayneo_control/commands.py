@@ -51,7 +51,10 @@ COMMANDS = {
            "ffalcon::XRService::PanelLunaSet. The Android app runs its UI index "
            "through a lookup table (falls back to 0xFF if out of range) before "
            "sending -- the raw device brightness scale behind that table is not "
-           "known, so a given val here may not match a specific OEM-app UI level."),
+           "known, so a given val here may not match a specific OEM-app UI level. "
+           "One live data point so far: val=0 reads BRIGHTER than val=1 -- this "
+           "looks like a dimness/index byte (lower = brighter), not a brightness "
+           "byte, but that's confirmed only near the low end, not across 0-255."),
     0x0D: ("BRIGHTNESS_SAVE", Confidence.TRACED,
            "ffalcon::XRService::PanelLunaSave. No value byte (val=0) -- persists "
            "whatever BRIGHTNESS was last set to."),

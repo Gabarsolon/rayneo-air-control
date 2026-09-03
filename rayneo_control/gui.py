@@ -58,6 +58,8 @@ class RayNeoGUI:
         self._work_q: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._tray: Optional["pystray.Icon"] = None
         self._debounce_ids: dict[str, str] = {}
+        self._live_state: dict[str, dict] = {}
+        self._live_lock = threading.Lock()
 
         self._build_ui()
         if _HAVE_TRAY:
@@ -96,6 +98,79 @@ class RayNeoGUI:
         if pending is not None:
             self.root.after_cancel(pending)
         self._debounce_ids[key] = self.root.after(delay_ms, fn)
+
+    def _apply_live(
+        self, key: str, level: int, send_fn: Callable[[int], bytes], label_fmt: Callable[[int], str],
+    ) -> None:
+        """Debounced AND serialized live-apply for a slider: a burst of drag
+        events collapses to the latest value (via _debounce), and sends for
+        the same `key` are never allowed to overlap -- if a send is still in
+        flight when a newer value arrives, that value gets picked up and
+        sent next by the same worker rather than opening a second concurrent
+        HID session. Two overlapping sessions can otherwise land on the
+        device out of order, so what's showing on screen isn't always what
+        last actually reached it."""
+        state = self._live_state.setdefault(key, {"latest": None, "sending": False})
+        state["latest"] = level
+
+        def fire() -> None:
+            with self._live_lock:
+                if state["sending"]:
+                    return  # a worker is already draining state["latest"]; it'll pick this up
+                state["sending"] = True
+
+            def worker() -> None:
+                while True:
+                    current = state["latest"]
+                    try:
+                        resp = send_fn(current)
+                        msg = f"{label_fmt(current)} ack: {resp.hex() if resp else '<no response>'}"
+                    except Exception as e:  # noqa: BLE001
+                        msg = f"{label_fmt(current)} error: {e}"
+                    self._log(msg)
+                    with self._live_lock:
+                        if state["latest"] == current:
+                            state["sending"] = False
+                            return
+                        # latest changed while sending -- loop immediately, no extra debounce delay
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        self._debounce(key, 120, fire)
+
+    def _bind_scale_keys(self, scale: ttk.Scale, from_: int, to: int, step: int = 1, page: int = 10) -> None:
+        """Explicit keyboard bindings for a ttk.Scale -- the built-in ones
+        are theme/version-dependent and easy to miss. Click the slider once
+        to focus it, then: Right/Up nudge by `step` toward `to` (the
+        slider's own positional end -- matches dragging even on a reversed
+        from_>to scale like brightness), Left/Down toward `from_`,
+        PageUp/PageDown jump by `page`, Home/End snap to the ends."""
+        lo, hi = min(from_, to), max(from_, to)
+        sign = 1 if to >= from_ else -1
+
+        def move(delta: int) -> Callable[[object], str]:
+            def handler(event: object = None) -> str:
+                new = min(hi, max(lo, int(round(scale.get())) + sign * delta))
+                scale.set(new)
+                return "break"
+
+            return handler
+
+        def snap_to(value: int) -> Callable[[object], str]:
+            def handler(event: object = None) -> str:
+                scale.set(value)
+                return "break"
+
+            return handler
+
+        scale.bind("<Right>", move(step))
+        scale.bind("<Up>", move(step))
+        scale.bind("<Left>", move(-step))
+        scale.bind("<Down>", move(-step))
+        scale.bind("<Prior>", move(page))
+        scale.bind("<Next>", move(-page))
+        scale.bind("<Home>", snap_to(from_))
+        scale.bind("<End>", snap_to(to))
 
     def _poll_queue(self) -> None:
         try:
@@ -210,17 +285,26 @@ class RayNeoGUI:
 
         # -- Brightness (slider, applies live/debounced -- no Set button).
         # BRIGHTNESS_SAVE (0x0D) writes to flash, so that stays a separate,
-        # deliberate button rather than firing on every drag tick. --------
+        # deliberate button rather than firing on every drag tick.
+        #
+        # from_=255, to=0 (reversed): one confirmed live data point so far
+        # is 0 reading BRIGHTER than 1, i.e. this is a dimness/index byte,
+        # not a brightness byte -- flipping the slider's own ends means
+        # dragging right still feels like "brighter" without guessing at
+        # a value transform we can't verify across the whole 0-255 range.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Brightness (0x09)", width=20).pack(side="left")
+        ttk.Label(row, text="Brightness (0x09)\n[0=brightest, per testing]", width=20, justify="left").pack(
+            side="left"
+        )
         self.brightness_var = tk.IntVar(value=128)
         self.brightness_label = ttk.Label(row, text="128", width=4)
         scale = ttk.Scale(
-            row, from_=0, to=255, orient="horizontal", variable=self.brightness_var,
+            row, from_=255, to=0, orient="horizontal", variable=self.brightness_var,
             command=self._on_brightness_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
+        self._bind_scale_keys(scale, 0, 255)
         self.brightness_label.pack(side="left", padx=(0, 4))
         ttk.Button(row, text="Save (0x0D)", command=self._save_brightness).pack(side="left", padx=4)
 
@@ -235,6 +319,7 @@ class RayNeoGUI:
             command=self._on_volume_change,
         )
         scale.pack(side="left", fill="x", expand=True, padx=4)
+        self._bind_scale_keys(scale, 0, 100)
         self.volume_label.pack(side="left", padx=(0, 4))
 
         # -- Refresh rate (two cmd_ids, not a value byte; applies on click) --
@@ -302,19 +387,12 @@ class RayNeoGUI:
     def _on_brightness_change(self, value: str) -> None:
         level = int(float(value))
         self.brightness_label.configure(text=str(level))
-        # debounced: only the last value in a burst of drag events actually
-        # gets sent, ~120ms after dragging stops -- not one send per pixel.
-        self._debounce("brightness", 120, lambda: self._send_brightness(level))
 
-    def _send_brightness(self, level: int) -> None:
-        def work() -> bytes:
+        def send(lv: int) -> bytes:
             with RayNeoDevice() as dev:
-                return dev.set_brightness(level)
+                return dev.set_brightness(lv)
 
-        def done(resp: bytes) -> None:
-            self._append_log(f"brightness -> {level} ack: {resp.hex()}")
-
-        self._run_async(work, done)
+        self._apply_live("brightness", level, send, lambda lv: f"brightness -> {lv}")
 
     def _save_brightness(self) -> None:
         self._log("saving brightness (0x0D)...")
@@ -331,17 +409,12 @@ class RayNeoGUI:
     def _on_volume_change(self, value: str) -> None:
         level = int(float(value))
         self.volume_label.configure(text=str(level))
-        self._debounce("volume", 120, lambda: self._send_volume(level))
 
-    def _send_volume(self, level: int) -> None:
-        def work() -> bytes:
+        def send(lv: int) -> bytes:
             with RayNeoDevice() as dev:
-                return dev.set_volume(level)
+                return dev.set_volume(lv)
 
-        def done(resp: bytes) -> None:
-            self._append_log(f"volume -> {level} ack: {resp.hex()}")
-
-        self._run_async(work, done)
+        self._apply_live("volume", level, send, lambda lv: f"volume -> {lv}")
 
     def _set_refresh_rate(self) -> None:
         hz = self.refresh_rate_var.get()
