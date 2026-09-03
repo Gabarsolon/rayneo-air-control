@@ -97,18 +97,21 @@ COMMANDS = {
     0x6E: ("GAMUT_MODE", Confidence.EXPERIMENTAL,
            "Handler at 0x08010504 indirects through *(0x2005A090)+0x34. Same caveat "
            "as GAMMA_INDEX -- prior tool's DCI-P3/Display-P3/BT.2020 names unverified."),
-    0x73: ("PICTURE_MODE", Confidence.EXPERIMENTAL,
+    0x73: ("PICTURE_MODE", Confidence.CONFIRMED,
            "ffalcon::XRService::PanelColorAdjust(mode, p1, p2) -- a 3-byte payload, "
-           "not a single value byte like the others above. Best guess: mode = OSD "
-           "'Picture mode' (Standard/Movie/Eye Comfort), p1 = OSD 'Color "
-           "enhancement' (Off/On). LIVE RESULT on taurus4p0: no response at all "
-           "for mode=1 and mode=2 (clean timeout, not a malformed-response error) "
-           "-- unlike every other command tried, which all ack. The Android SDK "
-           "is shared across many RayNeo models and gates this UI behind a "
-           "per-device isSupportAccumasterModeChange capability flag, so this is "
-           "most likely simply not wired up on this particular firmware build, "
-           "not a wrong byte-layout guess. Don't retry variations against a real "
-           "device -- a command the firmware won't ack isn't one to keep probing."),
+           "not a single value byte. RESOLVED: the earlier 'not implemented' "
+           "conclusion was wrong -- ground-truth Ghidra decompilation of the real "
+           "STM32 handler (0x08012278) shows it only acts when mode is EXACTLY "
+           "0x0C or 0x0F; every other value (including the 0/1/2 originally "
+           "guessed for Standard/Movie/Eye Comfort) silently no-ops with no "
+           "response, which is what every earlier live test was actually hitting. "
+           "mode=0x0F is confirmed live: it acks with a PANELCOLORPARAMS-style "
+           "readback. mode=0x0C calls a separate no-arg internal function and has "
+           "never acked -- may be fire-and-forget by design, not necessarily "
+           "broken. p1 must be < 0x65 (101) or the call silently no-ops -- looks "
+           "like a 0-100 style parameter, not yet mapped to a specific field. "
+           "The Standard/Movie/Eye-Comfort UI naming was never confirmed to "
+           "correspond to 0x0C/0x0F at all -- that mapping is still open."),
     0x06: ("SWITCH_TO_3D", Confidence.TRACED,
            "ffalcon::XRService::SwitchTo3D. No value byte -- explicit set, not a "
            "toggle. Matches the physical brightness+volume button combo used to "

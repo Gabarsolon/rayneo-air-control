@@ -200,15 +200,19 @@ class RayNeoDevice:
             raise TimeoutError("no response to SWITCH_SIDE_BY_SIDE command")
         return resp
 
-    # -- experimental operations -----------------------------------------
     def set_picture_mode(self, mode: int, p1: int = 0, p2: int = 0) -> bytes:
-        """EXPERIMENTAL -- see commands.COMMANDS[0x73]. ffalcon::XRService::
-        PanelColorAdjust builds its 3-byte extra payload as [0x00, p1, p2]
-        (explicitly zeroing the first extra byte, not DEFAULT_EXTRA) before
-        Send(cmd=0x73, val=mode, ptr, len=3) -- a previous version of this
-        method left byte[4] at DEFAULT_EXTRA (0x56) instead of 0x00, which
-        doesn't match the traced wire format and is the likely reason every
-        live attempt got a clean timeout rather than an ack."""
+        """CONFIRMED (mode=0x0F) -- see commands.COMMANDS[0x73]. The STM32
+        handler for this command (0x08012278, ground-truth decompiled from
+        the firmware image, not guessed) only does anything when `mode` is
+        exactly 0x0C or 0x0F -- every other value, including the 0/1/2 this
+        project originally guessed for Standard/Movie/Eye Comfort, silently
+        no-ops with no response. mode=0x0F is confirmed live: it acks with
+        what looks like a PANELCOLORPARAMS-style readback. mode=0x0C calls a
+        no-arg internal function and has never acked in testing -- may not
+        send a response by design (fire-and-forget), not necessarily broken.
+        p1 must be < 0x65 (101) or the whole call silently no-ops -- looks
+        like a 0-100 style parameter (contrast/hue/gain?), not yet mapped to
+        a specific field."""
         pkt = bytearray(protocol.build_short(Command.PICTURE_MODE, mode))
         pkt[4] = 0x00
         pkt[5] = p1

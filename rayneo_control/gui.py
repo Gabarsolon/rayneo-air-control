@@ -392,27 +392,29 @@ class RayNeoGUI:
         )
 
         # -- Picture mode + Color enhancement [OSD, both via 0x73] -- DISABLED:
-        # confirmed live that this device never acks 0x73 (clean timeout on
-        # two different values, not a malformed-response error) -- see
-        # commands.COMMANDS[0x73]. Left visible rather than removed so the
-        # controls this OSD item would need are still documented, just not
-        # clickable, until/unless a firmware build that implements it shows up.
+        # RESOLVED: ground-truth decompilation of the real STM32 handler
+        # (0x08012278) showed it only acts on mode==0x0C or 0x0F -- the
+        # 0/1/2 guessed here originally never matched either, hence the
+        # earlier "not working" timeouts. mode=0x0F is CONFIRMED live
+        # (acks with a color-params readback); mode=0x0C has never acked
+        # in testing (may be fire-and-forget by design). The Standard/
+        # Movie/Eye-Comfort naming was never confirmed to map to these
+        # values at all, so this shows the real numbers, not guessed names.
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Picture mode (0x73)\n[Standard/Movie/Eye Comfort]", width=20, justify="left").pack(
-            side="left"
-        )
-        self.picture_mode_name_var = tk.StringVar(value="Standard")
-        picture_combo = ttk.Combobox(
-            row, textvariable=self.picture_mode_name_var, state="disabled", width=12,
-            values=["Standard", "Movie", "Eye Comfort"],
-        )
-        picture_combo.pack(side="left", padx=4)
-        self.color_enhance_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            row, text="color enhancement", variable=self.color_enhance_var, state="disabled",
-        ).pack(side="left", padx=8)
-        ttk.Label(row, text="not working on this device", foreground="#b00000").pack(side="left", padx=(4, 0))
+        ttk.Label(row, text="Picture mode (0x73)\n[0x0C or 0x0F only]", width=20, justify="left").pack(side="left")
+        self.picture_mode_var = tk.StringVar(value="0x0F")
+        ttk.Combobox(
+            row, textvariable=self.picture_mode_var, state="readonly", width=8,
+            values=["0x0C", "0x0F"],
+        ).pack(side="left", padx=4)
+        ttk.Label(row, text="p1 (<101):").pack(side="left", padx=(8, 2))
+        self.picture_p1_var = tk.IntVar(value=50)
+        ttk.Entry(row, textvariable=self.picture_p1_var, width=5).pack(side="left")
+        ttk.Label(row, text="p2:").pack(side="left", padx=(8, 2))
+        self.picture_p2_var = tk.IntVar(value=0)
+        ttk.Entry(row, textvariable=self.picture_p2_var, width=5).pack(side="left")
+        ttk.Button(row, text="Send", command=self._set_picture_mode_raw).pack(side="left", padx=8)
 
         ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
         ttk.Label(
@@ -488,20 +490,18 @@ class RayNeoGUI:
 
         self._run_async(work, done)
 
-    _PICTURE_MODE_VALUES = {"Standard": 0, "Movie": 1, "Eye Comfort": 2}
-
-    def _set_picture_mode_friendly(self) -> None:
-        name = self.picture_mode_name_var.get()
-        mode = self._PICTURE_MODE_VALUES[name]
-        enhance = 1 if self.color_enhance_var.get() else 0
-        self._log(f"setting picture mode -> {name} ({mode}), color enhancement={enhance}...")
+    def _set_picture_mode_raw(self) -> None:
+        mode = int(self.picture_mode_var.get(), 16)
+        p1 = self.picture_p1_var.get()
+        p2 = self.picture_p2_var.get()
+        self._log(f"set_picture_mode(0x{mode:02x}, {p1}, {p2})...")
 
         def work() -> bytes:
             with RayNeoDevice() as dev:
-                return dev.set_picture_mode(mode, enhance, 0)
+                return dev.set_picture_mode(mode, p1, p2)
 
         def done(resp: bytes) -> None:
-            self._append_log(f"picture mode -> {name}, enhancement={enhance} ack: {resp.hex()}")
+            self._append_log(f"picture mode -> 0x{mode:02x} ack: {resp.hex()}")
 
         self._run_async(work, done)
 
@@ -575,43 +575,6 @@ class RayNeoGUI:
             ttk.Button(row, text="Send", command=lambda m=method, v=var: self._send_experimental(m, v)).pack(
                 side="left", padx=4
             )
-
-        ttk.Separator(frame, orient="horizontal").pack(fill="x", padx=8, pady=10)
-        row = ttk.Frame(frame)
-        row.pack(fill="x", padx=8, pady=6)
-        ttk.Label(row, text="Picture mode (0x73)", width=20).pack(side="left")
-        self.picture_mode_var = tk.StringVar(value="0")
-        self.picture_p1_var = tk.StringVar(value="0")
-        self.picture_p2_var = tk.StringVar(value="0")
-        for label, var in [("mode", self.picture_mode_var), ("p1", self.picture_p1_var), ("p2", self.picture_p2_var)]:
-            ttk.Label(row, text=label).pack(side="left", padx=(6, 2))
-            ttk.Entry(row, textvariable=var, width=5).pack(side="left")
-        ttk.Button(row, text="Send", command=self._send_picture_mode).pack(side="left", padx=6)
-        ttk.Label(
-            frame,
-            text="3-byte payload -- the wire layout (which of mode/p1/p2 lands "
-                 "where in the frame) is a best guess, not confirmed.",
-            wraplength=560, foreground="#666", justify="left",
-        ).pack(padx=8, anchor="w")
-
-    def _send_picture_mode(self) -> None:
-        try:
-            mode = int(self.picture_mode_var.get(), 0)
-            p1 = int(self.picture_p1_var.get(), 0)
-            p2 = int(self.picture_p2_var.get(), 0)
-        except ValueError:
-            self._append_log("invalid mode/p1/p2 -- use integers")
-            return
-        self._log(f"set_picture_mode({mode}, {p1}, {p2})...")
-
-        def work() -> bytes:
-            with RayNeoDevice() as dev:
-                return dev.set_picture_mode(mode, p1, p2)
-
-        def done(resp: bytes) -> None:
-            self._append_log(f"picture_mode({mode},{p1},{p2}) -> {resp.hex()}")
-
-        self._run_async(work, done)
 
     def _send_experimental(self, method_name: str, var: tk.StringVar) -> None:
         try:
