@@ -15,7 +15,7 @@ from typing import Optional
 import hid
 
 from . import protocol
-from .commands import Command, DisplayMode
+from .commands import BRIGHTNESS_LEVEL_TO_RAW, Command, DisplayMode
 
 VID = 0x1BBB
 PID = 0xAF50
@@ -114,11 +114,11 @@ class RayNeoDevice:
     def set_brightness_level(self, level: int) -> bytes:
         """CONFIRMED -- friendly wrapper around set_brightness() that
         translates an OSD brightness level (0=dimmest..7=brightest) through
-        commands.BRIGHTNESS_LEVEL_TO_RAW before sending, so the level you
-        pass here matches what the glasses' own OSD shows."""
-        if level not in commands.BRIGHTNESS_LEVEL_TO_RAW:
+        BRIGHTNESS_LEVEL_TO_RAW before sending, so the level you pass here
+        matches what the glasses' own OSD shows."""
+        if level not in BRIGHTNESS_LEVEL_TO_RAW:
             raise ValueError(f"brightness level must be 0-7, got {level!r}")
-        return self.set_brightness(commands.BRIGHTNESS_LEVEL_TO_RAW[level])
+        return self.set_brightness(BRIGHTNESS_LEVEL_TO_RAW[level])
 
     def save_brightness(self) -> bytes:
         """TRACED -- see commands.COMMANDS[0x0D]. No value byte; persists
