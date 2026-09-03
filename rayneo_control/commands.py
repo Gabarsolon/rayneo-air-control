@@ -93,14 +93,16 @@ COMMANDS = {
            "as GAMMA_INDEX -- prior tool's DCI-P3/Display-P3/BT.2020 names unverified."),
     0x73: ("PICTURE_MODE", Confidence.EXPERIMENTAL,
            "ffalcon::XRService::PanelColorAdjust(mode, p1, p2) -- a 3-byte payload, "
-           "not a single value byte like the others above. Send() call site is "
-           "understood; the exact byte layout on the wire (which of mode/p1/p2 "
-           "lands where in the frame) is not yet confirmed, hence EXPERIMENTAL "
-           "rather than TRACED despite having a real disassembled call site. Best "
-           "guess: mode = OSD 'Picture mode' (Standard/Movie/Eye Comfort), "
-           "p1 = OSD 'Color enhancement' (Off/On) -- no separate XRService method "
-           "for color enhancement exists, so it's likely folded into this same call. "
-           "Unconfirmed."),
+           "not a single value byte like the others above. Best guess: mode = OSD "
+           "'Picture mode' (Standard/Movie/Eye Comfort), p1 = OSD 'Color "
+           "enhancement' (Off/On). LIVE RESULT on taurus4p0: no response at all "
+           "for mode=1 and mode=2 (clean timeout, not a malformed-response error) "
+           "-- unlike every other command tried, which all ack. The Android SDK "
+           "is shared across many RayNeo models and gates this UI behind a "
+           "per-device isSupportAccumasterModeChange capability flag, so this is "
+           "most likely simply not wired up on this particular firmware build, "
+           "not a wrong byte-layout guess. Don't retry variations against a real "
+           "device -- a command the firmware won't ack isn't one to keep probing."),
 }
 
 
